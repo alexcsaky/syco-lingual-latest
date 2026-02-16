@@ -53,8 +53,8 @@ syco-lingual/
 │   └── plans/                     # Design documents
 ├── config/
 │   ├── experiment.yaml            # Experiment parameters (versioned)
-│   └── rubrics/                   # Judge rubric text files (per facet, per language)
-│       ├── mirroring_en.txt
+│   └── judge_prompts/             # Complete judge system prompts (per facet, per language)
+│       ├── mirroring_en.txt       # 40 files total: 4 facets x 10 languages
 │       ├── mirroring_ja.txt
 │       └── ...
 ├── data/
@@ -95,7 +95,7 @@ syco-lingual/
 - `schemas.py` is the single source of truth for all data structures.
 - One provider adapter file per API — isolates provider-specific quirks.
 - `data/` mirrors pipeline stages: prompts in, responses out, judgements out.
-- Rubrics as plain text files in `config/rubrics/` — Tanzim drops in translated versions without touching code.
+- Complete judge system prompts in `config/judge_prompts/` — Tanzim provides fully translated judge prompts (4 facets x 10 languages = 40 files).
 
 ---
 
@@ -135,8 +135,9 @@ class ModelResponse(BaseModel):
     facet: str
     variant: str
     language: str
-    model: str                  # e.g. "claude-sonnet-4-5"
-    model_version: str          # Exact version string from API response
+    prompt_text: str            # Original prompt sent to the model (self-contained for judging)
+    model: str                  # Friendly name, e.g. "claude-sonnet-4-5" (stable, used for grouping)
+    model_version: str          # Exact string from API response metadata (for reproducibility)
     response_text: str
     response_tokens: int
     reasoning_tokens: int       # 0 if reasoning disabled successfully
@@ -331,7 +332,7 @@ On startup, scan `responses.jsonl` line by line, extracting `(prompt_id, model)`
 
 ### 5.5 Atomic Writes
 
-All 6 provider workers write to the same `responses.jsonl` file. A threading lock + `file.flush()` + `os.fsync()` after each line write ensures:
+All 6 provider workers write to the same `responses.jsonl` file. An `asyncio.Lock` + `file.flush()` + `os.fsync()` after each line write ensures:
 - No interleaved partial lines from concurrent writers
 - Data is persisted to disk before the write is considered complete
 - A crash never corrupts the file (worst case: the last line is incomplete and gets skipped on reload)
@@ -344,7 +345,18 @@ All 6 provider workers write to the same `responses.jsonl` file. A threading loc
 - Max retries: configurable (default 5)
 - After max retries exhausted: log error with full context, skip the prompt, continue
 
-### 5.7 Progress Reporting
+### 5.7 Prompt Ordering
+
+Within each provider's 2,800 prompts, the order is **randomised with seed** (using `random_seed` from config). This ensures:
+- Partial runs produce evenly distributed data across all languages and facets
+- Temporal effects (API performance, rate limit patterns) are distributed evenly
+- The seed makes ordering reproducible across runs
+
+### 5.8 Input Contract
+
+`translated_text` in the input data is a **fully-formed, ready-to-send prompt**. The runner does NOT assemble prompts from templates or components. Tanzim's pipeline produces complete prompts (e.g. "リモートワークの方が良いと思います。あなたの意見は？") that the runner sends directly as the user message.
+
+### 5.9 Progress Reporting
 
 Periodic log output per provider:
 
@@ -360,7 +372,7 @@ Periodic log output per provider:
 ### 6.1 Flow
 
 ```
-1. Load config + rubrics (per facet, per language) from config/rubrics/
+1. Load config + judge system prompts (per facet, per language) from config/judge_prompts/
 2. Load responses.jsonl
 3. Load existing judgements.jsonl → build set of completed (prompt_id, model, judge) keys
 4. Build work queue: all (response, judge) pairs minus completed ones
@@ -382,19 +394,20 @@ Periodic log output per provider:
 ### 6.2 Judge Prompt Assembly
 
 ```python
-def build_judge_prompt(response, rubric_text, facet):
-    system_prompt = JUDGE_SYSTEM_TEMPLATE.format(
-        rubric=rubric_text,
-        score_range=FACET_SCORE_RANGES[facet],
-    )
+def build_judge_prompt(response: ModelResponse, facet: str, language: str):
+    # Load complete, pre-translated judge system prompt
+    system_prompt = load_judge_prompt(facet, language)  # from config/judge_prompts/
+
     user_message = JUDGE_USER_TEMPLATE.format(
-        original_prompt=response.original_prompt_text,
+        original_prompt=response.prompt_text,
         model_response=response.response_text,
     )
     return system_prompt, user_message
 ```
 
-The `JUDGE_SYSTEM_TEMPLATE` and `JUDGE_USER_TEMPLATE` define the structure (role, output format, anti-bias instruction). The rubric text is loaded from `config/rubrics/{facet}_{language}.txt` and inserted into the template. Exact rubric wording is defined separately from this codebase.
+Judge system prompts are **complete, pre-translated files** provided by Tanzim — one per facet per language (40 files total). Each file contains the full system prompt: role instruction, rubric, scoring range, output format spec, and anti-bias instruction, all in the target language. Stored in `config/judge_prompts/{facet}_{language}.txt`.
+
+Only the `JUDGE_USER_TEMPLATE` (which presents the prompt and response to be evaluated) is defined in code. This is a minimal structural template, not content that needs translation.
 
 ### 6.3 Score Validation
 
@@ -542,9 +555,21 @@ Replay uses recorded responses keyed by `(prompt_id, language)`. If a fixture is
 
 These are acknowledged dependencies or deferred items:
 
-1. **Judge rubric wording** — exact text for all 4 facets to be drafted separately (decision 22)
+1. **Judge system prompt wording** — English master text for all 4 facets to be drafted, then Tanzim translates into 40 complete judge prompt files (decision 22)
 2. **API key provisioning** — TBC for all 6 providers + DeepL (decision 5)
 3. **Exact model version strings** — to be pinned when API access is confirmed
 4. **xAI and DeepSeek structured output support** — to be confirmed (section 6.6)
 5. **Cost rates** — to be filled in `experiment.yaml` when pricing is confirmed
 6. **Prompt dataset** — produced by Tanzim's pipeline, not yet available
+
+## 11. Design Review Fixes (Post-Review)
+
+Issues found and resolved during critical review:
+
+1. **ModelResponse now includes `prompt_text`** — makes records self-contained so the judging module doesn't need to join against the prompts file
+2. **Atomic writes use `asyncio.Lock`** not `threading.Lock` — correct primitive for asyncio concurrency model
+3. **DeepL supports Bengali** — corrected from spec; DeepL used for all 10 languages in back-translation
+4. **`translated_text` is fully-formed** — runner sends it directly as user message, no template assembly needed
+5. **Judge system prompts are complete pre-translated files** — not rubric snippets; Tanzim provides 40 files (4 facets x 10 languages) containing full system prompts; stored in `config/judge_prompts/`
+6. **Prompt ordering is randomised with seed** — ensures partial runs produce evenly distributed data across languages and facets
+7. **`model` vs `model_version` clarified** — `model` is our friendly name (stable, for grouping); `model_version` is the exact API-returned string (for reproducibility)

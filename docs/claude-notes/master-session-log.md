@@ -64,5 +64,14 @@ _(updated as we go)_
 - `variant` field ("a"/"b"/"none") distinguishes paired prompts; `item_id` links pairs
 - ScoredItem aggregates 5 JudgeScores into median with is_valid (>=3 judges) check
 
+### Design Review Fixes (7 issues found)
+1. **ModelResponse needs `prompt_text` field** — judging module needs original prompt text; added to schema for self-containment
+2. **asyncio.Lock not threading.Lock** — we're in asyncio, not threads
+3. **DeepL supports Bengali** — spec was wrong, DeepL handles all 10 languages
+4. **`translated_text` is fully-formed** — ready-to-send prompts, no template assembly in runner
+5. **Judge system prompts are complete files** — not rubric snippets; 40 files from Tanzim (4 facets x 10 langs); renamed `config/rubrics/` → `config/judge_prompts/`
+6. **Prompt ordering randomised with seed** — partial runs produce even data distribution
+7. **`model` vs `model_version` clarified** — friendly name vs API-returned string
+
 ### Risks and Concerns Identified
 _(updated as we go)_
