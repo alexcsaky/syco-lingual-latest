@@ -60,7 +60,9 @@ Deferred: Analysis module (steps H-I)
 _(updated as we go)_
 
 ### Key Implementation Details Learned
-_(updated as we go)_
+- Schemas defined: TranslatedPrompt (input), ModelResponse (step E), JudgeScore + ScoredItem (step G)
+- `variant` field ("a"/"b"/"none") distinguishes paired prompts; `item_id` links pairs
+- ScoredItem aggregates 5 JudgeScores into median with is_valid (>=3 judges) check
 
 ### Risks and Concerns Identified
 _(updated as we go)_
