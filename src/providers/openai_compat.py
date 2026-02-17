@@ -40,6 +40,29 @@ class OpenAICompatibleProvider(BaseProvider):
             headers["X-Title"] = "SycoLingual"
         return headers
 
+    def _build_messages(self, system_prompt: str, user_message: str) -> list[dict]:
+        """Build messages array with prompt caching for OpenRouter.
+
+        When routing through OpenRouter, uses content array format with
+        cache_control on the system prompt. This enables Anthropic prompt
+        caching (other providers cache automatically).
+        """
+        if _OPENROUTER_HOST in self._base_url:
+            system_msg = {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            }
+        else:
+            system_msg = {"role": "system", "content": system_prompt}
+
+        return [system_msg, {"role": "user", "content": user_message}]
+
     async def complete(
         self,
         system_prompt: str,
@@ -49,10 +72,7 @@ class OpenAICompatibleProvider(BaseProvider):
     ) -> ProviderResponse:
         payload = {
             "model": self.model_id,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": self._build_messages(system_prompt, user_message),
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -90,10 +110,7 @@ class OpenAICompatibleProvider(BaseProvider):
         """Call with JSON response format. Uses json_schema response_format."""
         payload = {
             "model": self.model_id,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": self._build_messages(system_prompt, user_message),
             "temperature": temperature,
             "max_tokens": max_tokens,
             "response_format": {
