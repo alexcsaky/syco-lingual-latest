@@ -1,7 +1,7 @@
 """OpenAI-compatible provider adapter.
 
-Works with any API that follows the OpenAI chat completions format:
-OpenAI, xAI (Grok), Moonshot (Kimi), DeepSeek.
+Works with any API that follows the OpenAI chat completions format.
+When base_url points to OpenRouter, includes recommended OpenRouter headers.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from src.schemas import ProviderResponse
 
 logger = logging.getLogger(__name__)
 
+_OPENROUTER_HOST = "openrouter.ai"
+
 
 class OpenAICompatibleProvider(BaseProvider):
     def __init__(
@@ -27,6 +29,16 @@ class OpenAICompatibleProvider(BaseProvider):
         super().__init__(family=family, model_id=model_id)
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+
+    def _build_headers(self) -> dict[str, str]:
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if _OPENROUTER_HOST in self._base_url:
+            headers["HTTP-Referer"] = "https://github.com/alexcsaky/syco-lingual-latest"
+            headers["X-Title"] = "SycoLingual"
+        return headers
 
     async def complete(
         self,
@@ -48,10 +60,7 @@ class OpenAICompatibleProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=self._build_headers(),
                 json=payload,
             )
             response.raise_for_status()
@@ -78,7 +87,7 @@ class OpenAICompatibleProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
     ) -> ProviderResponse:
-        """Call with JSON response format. Uses json_schema response_format where supported."""
+        """Call with JSON response format. Uses json_schema response_format."""
         payload = {
             "model": self.model_id,
             "messages": [
@@ -100,10 +109,7 @@ class OpenAICompatibleProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=self._build_headers(),
                 json=payload,
             )
             response.raise_for_status()
