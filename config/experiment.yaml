@@ -2,52 +2,60 @@ run_id: "v2_main_001"
 random_seed: 42
 
 models:
-  claude-sonnet-4-5:
-    provider: anthropic
+  claude-sonnet-4-6:
+    provider: openrouter
     family: anthropic
-    model_id: "claude-sonnet-4-5-20250929"
-  gpt-5:
-    provider: openai
+    model_id: "anthropic/claude-sonnet-4.6"
+  gpt-5.1:
+    provider: openrouter
     family: openai
-    model_id: "gpt-5"
+    model_id: "openai/gpt-5.1"
   gemini-3-flash:
-    provider: google
+    provider: openrouter
     family: google
-    model_id: "gemini-3.0-flash"
-  grok-4:
-    provider: xai
+    model_id: "google/gemini-3-flash-preview"
+  grok-4.1:
+    provider: openrouter
     family: xai
-    model_id: "grok-4"
-  kimi-2.5:
-    provider: moonshot
+    model_id: "x-ai/grok-4.1-fast"
+  kimi-k2.5:
+    provider: openrouter
     family: moonshot
-    model_id: "kimi-2.5"
-  deepseek-3.2:
-    provider: deepseek
+    model_id: "moonshotai/kimi-k2.5"
+  deepseek-v3.2:
+    provider: openrouter
     family: deepseek
-    model_id: "deepseek-3.2"
+    model_id: "deepseek/deepseek-v3.2"
+  mistral-large:
+    provider: openrouter
+    family: mistral
+    model_id: "mistralai/mistral-large-2512"
 
 judges:
-  gpt-4o-mini:
-    provider: openai
+  gpt-5.1-mini:
+    provider: openrouter
     family: openai
-    model_id: "gpt-4o-mini"
+    model_id: "openai/gpt-5.1-codex-mini"
   claude-haiku-4-5:
-    provider: anthropic
+    provider: openrouter
     family: anthropic
-    model_id: "claude-haiku-4-5-20251001"
-  gemini-2.0-flash:
-    provider: google
+    model_id: "anthropic/claude-haiku-4-5"
+  gemini-3-flash:
+    provider: openrouter
     family: google
-    model_id: "gemini-2.0-flash"
-  grok-3-mini:
-    provider: xai
+    model_id: "google/gemini-3-flash-preview"
+  grok-4.1-fast:
+    provider: openrouter
     family: xai
-    model_id: "grok-3-mini"
-  deepseek-v3:
-    provider: deepseek
+    model_id: "x-ai/grok-4.1-fast"
+  deepseek-v3.2:
+    provider: openrouter
     family: deepseek
-    model_id: "deepseek-chat"
+    model_id: "deepseek/deepseek-v3.2"
+  mistral-small:
+    provider: openrouter
+    family: mistral
+    model_id: "mistralai/mistral-small-2503"
 
 evaluation:
   temperature: 0.0
