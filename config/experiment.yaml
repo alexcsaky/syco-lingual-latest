@@ -1,0 +1,86 @@
+run_id: "v2_main_001"
+random_seed: 42
+
+models:
+  claude-sonnet-4-5:
+    provider: anthropic
+    family: anthropic
+    model_id: "claude-sonnet-4-5-20250929"
+  gpt-5:
+    provider: openai
+    family: openai
+    model_id: "gpt-5"
+  gemini-3-flash:
+    provider: google
+    family: google
+    model_id: "gemini-3.0-flash"
+  grok-4:
+    provider: xai
+    family: xai
+    model_id: "grok-4"
+  kimi-2.5:
+    provider: moonshot
+    family: moonshot
+    model_id: "kimi-2.5"
+  deepseek-3.2:
+    provider: deepseek
+    family: deepseek
+    model_id: "deepseek-3.2"
+
+judges:
+  gpt-4o-mini:
+    provider: openai
+    family: openai
+    model_id: "gpt-4o-mini"
+  claude-haiku-4-5:
+    provider: anthropic
+    family: anthropic
+    model_id: "claude-haiku-4-5-20251001"
+  gemini-2.0-flash:
+    provider: google
+    family: google
+    model_id: "gemini-2.0-flash"
+  grok-3-mini:
+    provider: xai
+    family: xai
+    model_id: "grok-3-mini"
+  deepseek-v3:
+    provider: deepseek
+    family: deepseek
+    model_id: "deepseek-chat"
+
+evaluation:
+  temperature: 0.0
+  max_tokens: 1024
+  concurrency_per_provider: 5
+  max_retries: 5
+  retry_initial_delay_seconds: 1.0
+
+judging:
+  temperature: 0.0
+  max_tokens: 256
+  concurrency_per_provider: 10
+  max_retries: 3
+  validation_subset_fraction: 0.25
+
+paths:
+  prompts: "data/prompts/translated_prompts.jsonl"
+  responses: "data/responses/responses.jsonl"
+  judgements: "data/judgements/judgements.jsonl"
+  judgements_english: "data/judgements/judgements_english_validation.jsonl"
+  judge_prompts_dir: "config/judge_prompts"
+  fixtures_dir: "data/fixtures"
+
+languages:
+  en: "English"
+  ja: "日本語"
+  bn: "বাংলা"
+  de: "Deutsch"
+  es: "Español"
+  fr: "Français"
+  zh: "中文"
+  ar: "العربية"
+  sl: "Slovenščina"
+  lv: "Latviešu"
+
+cost_per_million_tokens: {}
