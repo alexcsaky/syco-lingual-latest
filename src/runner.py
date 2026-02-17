@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import time
 from datetime import datetime, timezone
@@ -70,9 +71,12 @@ class EvaluationRunner:
                         model_id=model_config.model_id,
                     )
                 else:
-                    # Real providers will be created here once implemented
-                    raise NotImplementedError(
-                        f"Real provider for {model_config.provider} not yet implemented"
+                    from src.providers import create_provider
+                    api_keys = {
+                        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
+                    }
+                    providers[model_name] = create_provider(
+                        model_name, model_config, api_keys
                     )
 
             # Run all models in parallel

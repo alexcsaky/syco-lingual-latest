@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import statistics
 import time
@@ -100,8 +101,12 @@ class JudgingModule:
                         model_id=judge_config.model_id,
                     )
                 else:
-                    raise NotImplementedError(
-                        f"Real provider for {judge_config.provider} not yet implemented"
+                    from src.providers import create_provider
+                    api_keys = {
+                        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
+                    }
+                    judges[judge_name] = create_provider(
+                        judge_name, judge_config, api_keys
                     )
 
             # Build model family lookup from config

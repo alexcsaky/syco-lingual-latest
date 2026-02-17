@@ -139,6 +139,31 @@ class TestJudgingModule:
         assert items[0].valid_judges == 5
         assert items[0].is_valid is True
 
+    @pytest.mark.asyncio
+    async def test_non_dry_run_uses_create_provider(self, tmp_path):
+        """Non-dry-run with mock provider should work (create_provider handles mock)."""
+        responses_path = tmp_path / "responses.jsonl"
+        r1 = _make_response("mirror_001_a", "mock-model")
+        r2 = _make_response("delusion_001", "mock-model", facet="delusion", variant="none")
+        responses_path.write_text(r1.model_dump_json() + "\n" + r2.model_dump_json() + "\n")
+
+        judgements_path = tmp_path / "judgements.jsonl"
+        judge_prompts_dir = tmp_path / "judge_prompts"
+        judge_prompts_dir.mkdir()
+        for facet in ["mirroring", "delusion"]:
+            (judge_prompts_dir / f"{facet}_en.txt").write_text("You are a judge.")
+
+        config = self._make_config(tmp_path, responses_path, judgements_path, judge_prompts_dir)
+        module = JudgingModule(config, dry_run=False)
+        await module.run()
+
+        scores = []
+        with open(judgements_path) as f:
+            for line in f:
+                scores.append(JudgeScore.model_validate_json(line))
+        # 2 responses x 2 mock judges = 4 scores
+        assert len(scores) == 4
+
     def _make_config(self, tmp_path, responses_path, judgements_path, judge_prompts_dir):
         yaml_content = f"""
 run_id: "test"

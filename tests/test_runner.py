@@ -114,6 +114,19 @@ class TestEvaluationRunner:
                 assert len(r.prompt_text) > 0
 
     @pytest.mark.asyncio
+    async def test_non_dry_run_uses_create_provider(self, mock_config):
+        """Non-dry-run with mock provider should work (create_provider handles mock)."""
+        runner = EvaluationRunner(mock_config, dry_run=False)
+        await runner.run()
+
+        responses = []
+        with open(mock_config.paths.responses) as f:
+            for line in f:
+                responses.append(json.loads(line))
+        # Same as dry_run: 6 prompts x 2 models = 12 responses
+        assert len(responses) == 12
+
+    @pytest.mark.asyncio
     async def test_language_detection_populated(self, mock_config):
         runner = EvaluationRunner(mock_config, dry_run=True)
         await runner.run()
