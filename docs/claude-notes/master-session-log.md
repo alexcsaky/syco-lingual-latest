@@ -112,9 +112,37 @@ _(updated as we go)_
 - All provider adapters implemented, ready for real API keys
 
 ### What's Needed Before Production
-- Real API keys in `.env` (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, XAI_API_KEY, MOONSHOT_API_KEY, DEEPSEEK_API_KEY, DEEPL_API_KEY)
+- ~~Real API keys in `.env` (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)~~ → Now just `OPENROUTER_API_KEY`
 - Real translated prompts from Tanzim in `data/prompts/translated_prompts.jsonl`
 - Real judge system prompts from Tanzim in `config/judge_prompts/` (40 files: 4 facets × 10 languages)
-- Wire `create_provider()` into runner.py and judge.py (currently they use MockProvider directly in non-dry-run mode — needs integration)
+- ~~Wire `create_provider()` into runner.py and judge.py~~ → Done (2026-02-17)
+- Retry error type distinction (retryable vs permanent HTTP errors)
+- Analysis module (steps H-I, deferred)
+
+---
+
+## Session: 2026-02-17 — OpenRouter Migration + Mistral Addition
+
+### Changes Made
+- Replaced 6 direct provider APIs (OpenAI, Anthropic, Google, xAI, Moonshot, DeepSeek) with single OpenRouter endpoint
+- Deleted 5 provider adapter files: anthropic.py, google.py, xai.py, moonshot.py, deepseek.py
+- Added OpenRouter headers (HTTP-Referer, X-Title) to OpenAICompatibleProvider via `_build_headers()`
+- Rewrote provider registry: 2 entries (mock + openrouter) instead of 7
+- Added Mistral Large (`mistralai/mistral-large-2512`) as 7th evaluated model
+- Added Mistral Small (`mistralai/mistral-small-2503`) as 6th judge
+- Updated all model IDs to latest OpenRouter slugs (Claude 4.6, GPT 5.1, Gemini 3 Flash, Grok 4.1, etc.)
+- Wired `create_provider()` into runner.py and judge.py for non-dry-run mode
+- Updated experiment.yaml: 7 models + 6 judges, all `provider: openrouter`
+- 68 tests passing
+
+### Scale Update
+- 7 models × 280 prompts/lang × 10 langs = 19,600 eval calls (was 16,800)
+- 6 judges × 19,600 = 117,600 judge calls (was 84,000)
+
+### What's Needed Before Production
+- `OPENROUTER_API_KEY` in `.env`
+- Real translated prompts from Tanzim
+- Real judge system prompts from Tanzim (40 files: 4 facets × 10 languages)
+- Verify OpenRouter model IDs are current (check openrouter.ai/models)
 - Retry error type distinction (retryable vs permanent HTTP errors)
 - Analysis module (steps H-I, deferred)
