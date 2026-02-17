@@ -4,7 +4,7 @@ This is the core of Step F in the SycoLingual pipeline.
 
 Each model response is sent to all configured judge models in parallel.
 Each judge uses complete_structured() with a JSON schema for score + justification.
-The aggregate() method groups scores by (prompt_id, model), computes the median,
+The aggregate() method groups scores by (prompt_id, language, model), computes the median,
 and writes ScoredItem records.  A minimum of 3 valid judge scores is required
 for the median to be considered valid.
 """
@@ -131,20 +131,21 @@ class JudgingModule:
     def aggregate(self, judgements_path: str, output_path: str) -> None:
         """Aggregate individual judge scores into ScoredItems with medians.
 
-        Groups by (prompt_id, model) and computes median.
+        Groups by (prompt_id, language, model) and computes median.
         Marks records as invalid if fewer than 3 judges returned scores.
         """
         # Load all judge scores
         scores = load_jsonl(judgements_path, JudgeScore)
 
-        # Group by (prompt_id, model)
-        groups: dict[tuple[str, str], list[JudgeScore]] = defaultdict(list)
+        # Group by (prompt_id, language, model) — same prompt in different languages
+        # are independent data points
+        groups: dict[tuple[str, str, str], list[JudgeScore]] = defaultdict(list)
         for s in scores:
-            groups[(s.prompt_id, s.model)].append(s)
+            groups[(s.prompt_id, s.language, s.model)].append(s)
 
         # Compute medians and write scored items
         with open(output_path, "w", encoding="utf-8") as f:
-            for (prompt_id, model), group_scores in groups.items():
+            for (prompt_id, language, model), group_scores in groups.items():
                 judge_scores_dict = {s.judge_family: s.score for s in group_scores}
                 score_values = list(judge_scores_dict.values())
                 median = compute_median(score_values)

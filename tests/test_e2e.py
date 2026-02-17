@@ -103,11 +103,8 @@ cost_per_million_tokens: {{}}
         with open(scored_path) as f:
             for line in f:
                 scored.append(ScoredItem.model_validate_json(line))
-        # Aggregation groups by (prompt_id, model).  The fixture has 3 unique
-        # prompt_ids (mirror_001_a, mirror_001_b, delusion_001), each appearing
-        # in 2 languages, so we get 3 scored items.  Each group has 6 judge
-        # scores (3 judges x 2 languages) but the dict is keyed by judge_family,
-        # collapsing to 3 entries per group.
-        assert len(scored) == 3  # 3 unique (prompt_id, model) pairs
+        # Aggregation groups by (prompt_id, language, model).
+        # 3 unique prompt_ids x 2 languages x 1 model = 6 scored items.
+        assert len(scored) == 6
         assert all(s.is_valid for s in scored)  # All have 3+ judges
         assert all(s.median_score is not None for s in scored)
