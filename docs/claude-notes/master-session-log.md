@@ -75,3 +75,46 @@ _(updated as we go)_
 
 ### Risks and Concerns Identified
 _(updated as we go)_
+
+---
+
+## Session: 2026-02-16 — Implementation Complete
+
+### Status: ALL 16 TASKS COMPLETE
+- 74 tests passing, 21 commits on main
+- Pushed to https://github.com/alexcsaky/syco-lingual-latest
+
+### Implementation Summary (16 tasks)
+1. Project setup + dependencies (requirements.txt, pyproject.toml, venv)
+2. Pydantic schemas (TranslatedPrompt, ModelResponse, JudgeScore, ScoredItem, ProviderResponse)
+3. Config system (YAML + Pydantic validation, experiment.yaml with 6 models, 5 judges, 10 languages)
+4. Provider base class + MockProvider (deterministic hash-based mock responses)
+5. File I/O (JsonlWriter with asyncio.Lock + fsync, resume scanner, typed JSONL loader)
+6. Language detection + cost estimation utilities
+7. Evaluation runner (parallel models, bounded concurrency, resumability, language detection)
+8. Judging module (5-judge panel, self_family flag, score aggregation, median computation)
+9. Back-translation module (DeepL API with mock mode for English validation subset)
+10. CLI entry point (evaluate, judge, status subcommands)
+11. End-to-end pipeline test (prompts → eval → responses → judging → scored items)
+12. OpenAI-compatible providers (OpenAI, xAI, Moonshot, DeepSeek)
+13. Anthropic provider (Messages API, tool use for structured output)
+14. Google Gemini provider (generateContent API, responseMimeType for structured output)
+15. Provider registry (factory function with API key validation)
+16. Final integration verification and cleanup
+
+### Bug Found and Fixed During Implementation
+- **Aggregation key bug**: `aggregate()` was grouping by `(prompt_id, model)` instead of `(prompt_id, language, model)`. This would have merged cross-linguistic judge scores, destroying the per-language signal that is the whole point of the study. Fixed in commit `6885aeb`.
+
+### What's Ready
+- `python run.py evaluate --dry-run` — runs full evaluation with mock providers
+- `python run.py judge --dry-run` — runs 5-judge panel with mock providers
+- `python run.py status` — shows pipeline progress
+- All provider adapters implemented, ready for real API keys
+
+### What's Needed Before Production
+- Real API keys in `.env` (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, XAI_API_KEY, MOONSHOT_API_KEY, DEEPSEEK_API_KEY, DEEPL_API_KEY)
+- Real translated prompts from Tanzim in `data/prompts/translated_prompts.jsonl`
+- Real judge system prompts from Tanzim in `config/judge_prompts/` (40 files: 4 facets × 10 languages)
+- Wire `create_provider()` into runner.py and judge.py (currently they use MockProvider directly in non-dry-run mode — needs integration)
+- Retry error type distinction (retryable vs permanent HTTP errors)
+- Analysis module (steps H-I, deferred)
