@@ -1,15 +1,9 @@
-import os
 import pytest
 from src.providers import create_provider
 from src.config import ModelConfig
 from src.providers.base import BaseProvider
 from src.mock import MockProvider
 from src.providers.openai_compat import OpenAICompatibleProvider
-from src.providers.anthropic import AnthropicProvider
-from src.providers.google import GoogleProvider
-from src.providers.xai import XAIProvider
-from src.providers.moonshot import MoonshotProvider
-from src.providers.deepseek import DeepSeekProvider
 
 
 class TestCreateProvider:
@@ -18,36 +12,26 @@ class TestCreateProvider:
         p = create_provider("test", config, {})
         assert isinstance(p, MockProvider)
 
-    def test_openai_provider(self):
-        config = ModelConfig(provider="openai", family="openai", model_id="gpt-5")
-        p = create_provider("test", config, {"OPENAI_API_KEY": "fake"})
+    def test_openrouter_provider(self):
+        config = ModelConfig(
+            provider="openrouter",
+            family="openai",
+            model_id="openai/gpt-5.1",
+        )
+        p = create_provider("test", config, {"OPENROUTER_API_KEY": "fake-key"})
         assert isinstance(p, OpenAICompatibleProvider)
         assert p.family == "openai"
+        assert p.model_id == "openai/gpt-5.1"
+        assert p._base_url == "https://openrouter.ai/api/v1"
 
-    def test_anthropic_provider(self):
-        config = ModelConfig(provider="anthropic", family="anthropic", model_id="claude-sonnet-4-5")
-        p = create_provider("test", config, {"ANTHROPIC_API_KEY": "fake"})
-        assert isinstance(p, AnthropicProvider)
-
-    def test_google_provider(self):
-        config = ModelConfig(provider="google", family="google", model_id="gemini-3.0-flash")
-        p = create_provider("test", config, {"GOOGLE_API_KEY": "fake"})
-        assert isinstance(p, GoogleProvider)
-
-    def test_xai_provider(self):
-        config = ModelConfig(provider="xai", family="xai", model_id="grok-4")
-        p = create_provider("test", config, {"XAI_API_KEY": "fake"})
-        assert isinstance(p, XAIProvider)
-
-    def test_moonshot_provider(self):
-        config = ModelConfig(provider="moonshot", family="moonshot", model_id="kimi-2.5")
-        p = create_provider("test", config, {"MOONSHOT_API_KEY": "fake"})
-        assert isinstance(p, MoonshotProvider)
-
-    def test_deepseek_provider(self):
-        config = ModelConfig(provider="deepseek", family="deepseek", model_id="deepseek-3.2")
-        p = create_provider("test", config, {"DEEPSEEK_API_KEY": "fake"})
-        assert isinstance(p, DeepSeekProvider)
+    def test_openrouter_passes_family_from_config(self):
+        config = ModelConfig(
+            provider="openrouter",
+            family="mistral",
+            model_id="mistralai/mistral-large-2512",
+        )
+        p = create_provider("test", config, {"OPENROUTER_API_KEY": "fake-key"})
+        assert p.family == "mistral"
 
     def test_unknown_provider_raises(self):
         config = ModelConfig(provider="unknown", family="test", model_id="test")
@@ -55,6 +39,10 @@ class TestCreateProvider:
             create_provider("test", config, {})
 
     def test_missing_api_key_raises(self):
-        config = ModelConfig(provider="openai", family="openai", model_id="gpt-5")
-        with pytest.raises(ValueError, match="API key"):
+        config = ModelConfig(
+            provider="openrouter",
+            family="openai",
+            model_id="openai/gpt-5.1",
+        )
+        with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             create_provider("test", config, {})
