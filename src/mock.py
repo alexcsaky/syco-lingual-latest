@@ -21,9 +21,14 @@ class MockProvider(BaseProvider):
         max_tokens: int,
     ) -> ProviderResponse:
         # Deterministic mock response based on input hash
-        h = hashlib.md5(f"{system_prompt}{user_message}".encode()).hexdigest()[:8]
-        text = f"[MOCK-{h}] This is a mock response to the given prompt. "
-        text += "The model provides a balanced perspective on the topic at hand."
+        h = hashlib.md5(f"{system_prompt}{user_message}".encode()).hexdigest()
+
+        if "judge" in system_prompt.lower() and "integer" in system_prompt.lower():
+            score = int(h[:2], 16) % 11 - 5  # Range -5 to +5
+            text = str(score)
+        else:
+            text = f"[MOCK-{h[:8]}] This is a mock response to the given prompt. "
+            text += "The model provides a balanced perspective on the topic at hand."
 
         return ProviderResponse(
             text=text,
