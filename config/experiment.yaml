@@ -72,11 +72,11 @@ judging:
   validation_subset_fraction: 0.25
 
 paths:
-  prompts: "data/prompts/translated_prompts.jsonl"
+  prompts: "data/TESTFOLDER/multi_benchmark/prompts.jsonl"
   responses: "data/responses/responses.jsonl"
   judgements: "data/judgements/judgements.jsonl"
   judgements_english: "data/judgements/judgements_english_validation.jsonl"
-  judge_prompts_dir: "config/judge_prompts"
+  judge_templates: "data/TESTFOLDER/multi_benchmark/judges.jsonl"
   fixtures_dir: "data/fixtures"
 
 languages:

@@ -12,6 +12,7 @@ import random
 import time
 from datetime import datetime, timezone
 
+from src.chain_selector import select_best_chains
 from src.config import ExperimentConfig
 from src.cost import estimate_cost
 from src.io import JsonlWriter, load_completed_keys, load_jsonl
@@ -38,9 +39,10 @@ class EvaluationRunner:
         self.model_filter = model_filter
 
     async def run(self) -> None:
-        # Load prompts
+        # Load prompts and select best translation chains
         prompts = load_jsonl(self.config.paths.prompts, TranslatedPrompt)
-        logger.info(f"Loaded {len(prompts)} prompts")
+        prompts = select_best_chains(prompts)
+        logger.info(f"Loaded {len(prompts)} prompts (after chain selection)")
 
         # Shuffle prompts deterministically for even distribution in partial runs
         rng = random.Random(self.config.random_seed)
@@ -49,7 +51,7 @@ class EvaluationRunner:
         # Scan existing responses for resumability
         completed = load_completed_keys(
             self.config.paths.responses,
-            key_fields=["prompt_id", "language", "model"],
+            key_fields=["prompt_uid", "lang", "model"],
         )
         logger.info(f"Found {len(completed)} completed responses, will skip those")
 
@@ -109,25 +111,25 @@ class EvaluationRunner:
 
         async def process_prompt(prompt: TranslatedPrompt) -> None:
             # Check if already completed (resumability)
-            key = (prompt.prompt_id, prompt.language, model_name)
+            key = (prompt.prompt_uid, prompt.lang, model_name)
             if key in completed:
                 return
 
             async with semaphore:
                 # Build system prompt
-                lang_name = self.config.languages.get(prompt.language, prompt.language)
+                lang_name = self.config.languages.get(prompt.lang, prompt.lang)
                 system_prompt = SYSTEM_PROMPT_TEMPLATE.format(language=lang_name)
 
                 # Call provider with retry
                 start_time = time.monotonic()
                 response = await self._call_with_retry(
-                    provider, system_prompt, prompt.translated_text
+                    provider, system_prompt, prompt.composed_prompt
                 )
                 latency_ms = int((time.monotonic() - start_time) * 1000)
 
                 # Language detection
                 detected_lang = detect_language(response.text)
-                lang_match = check_language_match(prompt.language, detected_lang)
+                lang_match = check_language_match(prompt.lang, detected_lang)
 
                 # Cost estimation
                 cost_config = self.config.cost_per_million_tokens.get(model_name)
@@ -142,12 +144,13 @@ class EvaluationRunner:
 
                 # Build response record
                 record = ModelResponse(
-                    prompt_id=prompt.prompt_id,
+                    prompt_uid=prompt.prompt_uid,
                     item_id=prompt.item_id,
                     facet=prompt.facet,
-                    variant=prompt.variant,
-                    language=prompt.language,
-                    prompt_text=prompt.translated_text,
+                    run=prompt.run,
+                    lang=prompt.lang,
+                    chain=prompt.chain,
+                    prompt_text=prompt.composed_prompt,
                     model=model_name,
                     model_version=response.model_version,
                     response_text=response.text,

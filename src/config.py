@@ -39,7 +39,7 @@ class PathsConfig(BaseModel):
     responses: str
     judgements: str
     judgements_english: str
-    judge_prompts_dir: str
+    judge_templates: str
     fixtures_dir: str
 
 

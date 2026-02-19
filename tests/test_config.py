@@ -42,7 +42,7 @@ paths:
   responses: "data/responses/responses.jsonl"
   judgements: "data/judgements/judgements.jsonl"
   judgements_english: "data/judgements/judgements_english_validation.jsonl"
-  judge_prompts_dir: "config/judge_prompts"
+  judge_templates: "config/judge_prompts"
   fixtures_dir: "data/fixtures"
 
 languages:
@@ -90,7 +90,7 @@ paths:
   responses: "x"
   judgements: "x"
   judgements_english: "x"
-  judge_prompts_dir: "x"
+  judge_templates: "x"
   fixtures_dir: "x"
 languages: {}
 cost_per_million_tokens: {}

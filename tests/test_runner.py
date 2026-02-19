@@ -47,7 +47,7 @@ paths:
   responses: "{responses_path}"
   judgements: "x"
   judgements_english: "x"
-  judge_prompts_dir: "x"
+  judge_templates: "x"
   fixtures_dir: "x"
 languages:
   en: "English"

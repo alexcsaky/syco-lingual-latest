@@ -10,10 +10,11 @@ from src.io import JsonlWriter, load_completed_keys, load_jsonl
 from src.schemas import ModelResponse
 
 
-def _make_response(prompt_id: str, model: str) -> ModelResponse:
+def _make_response(prompt_uid: str, model: str) -> ModelResponse:
     return ModelResponse(
-        prompt_id=prompt_id, item_id=prompt_id.rsplit("_", 1)[0],
-        facet="mirroring", variant="a", language="en",
+        prompt_uid=prompt_uid, item_id=1,
+        facet="mirror", run="stance1", lang="en",
+        chain="deepl_deepl",
         prompt_text="test", model=model, model_version="v1",
         response_text="test response", response_tokens=10,
         reasoning_tokens=0, finish_reason="stop",
@@ -35,7 +36,7 @@ class TestJsonlWriter:
         lines = path.read_text().strip().split("\n")
         assert len(lines) == 1
         data = json.loads(lines[0])
-        assert data["prompt_id"] == "mirror_001_a"
+        assert data["prompt_uid"] == "mirror_001_a"
 
     @pytest.mark.asyncio
     async def test_append_mode(self, tmp_path):
@@ -71,12 +72,12 @@ class TestLoadCompletedKeys:
     def test_empty_file(self, tmp_path):
         path = tmp_path / "empty.jsonl"
         path.write_text("")
-        keys = load_completed_keys(str(path), key_fields=["prompt_id", "model"])
+        keys = load_completed_keys(str(path), key_fields=["prompt_uid", "model"])
         assert keys == set()
 
     def test_nonexistent_file(self, tmp_path):
         path = tmp_path / "nope.jsonl"
-        keys = load_completed_keys(str(path), key_fields=["prompt_id", "model"])
+        keys = load_completed_keys(str(path), key_fields=["prompt_uid", "model"])
         assert keys == set()
 
     def test_loads_correct_keys(self, tmp_path):
@@ -85,7 +86,7 @@ class TestLoadCompletedKeys:
         r2 = _make_response("mirror_001_a", "claude-sonnet-4-5")
         path.write_text(r1.model_dump_json() + "\n" + r2.model_dump_json() + "\n")
 
-        keys = load_completed_keys(str(path), key_fields=["prompt_id", "model"])
+        keys = load_completed_keys(str(path), key_fields=["prompt_uid", "model"])
         assert ("mirror_001_a", "gpt-5") in keys
         assert ("mirror_001_a", "claude-sonnet-4-5") in keys
         assert len(keys) == 2
@@ -95,7 +96,7 @@ class TestLoadCompletedKeys:
         r1 = _make_response("mirror_001_a", "gpt-5")
         path.write_text(r1.model_dump_json() + "\n" + "CORRUPT LINE\n")
 
-        keys = load_completed_keys(str(path), key_fields=["prompt_id", "model"])
+        keys = load_completed_keys(str(path), key_fields=["prompt_uid", "model"])
         assert len(keys) == 1
 
 
@@ -107,4 +108,4 @@ class TestLoadJsonl:
 
         results = load_jsonl(str(path), ModelResponse)
         assert len(results) == 1
-        assert results[0].prompt_id == "mirror_001_a"
+        assert results[0].prompt_uid == "mirror_001_a"
