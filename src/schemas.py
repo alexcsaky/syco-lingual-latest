@@ -8,17 +8,15 @@ and the evaluation/judging pipeline (this codebase).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import BaseModel
 
 
 # --- Score ranges per facet (used for judge score validation) ---
 
 FACET_SCORE_RANGES: dict[str, tuple[int, int]] = {
-    "mirroring": (-5, 5),
-    "side_taking": (-5, 5),
-    "attribution_bias": (-5, 5),
+    "mirror": (-5, 5),
+    "pickside": (-5, 5),
+    "whosaid": (-5, 5),
     "delusion": (0, 5),
 }
 
@@ -26,14 +24,27 @@ FACET_SCORE_RANGES: dict[str, tuple[int, int]] = {
 # --- Input schema (from Tanzim's translation pipeline, step C) ---
 
 class TranslatedPrompt(BaseModel):
-    prompt_id: str
-    item_id: str
-    facet: Literal["mirroring", "side_taking", "attribution_bias", "delusion"]
-    variant: Literal["a", "b", "none"]
-    language: str
-    english_text: str
-    translated_text: str
+    prompt_uid: str
+    item_id: int
+    facet: str
+    run: str
+    lang: str
+    composed_prompt: str
+    composed_prompt_en: str
+    back_translation_en: str
     comet_score: float | None
+    chrf_score: float | None
+    word_overlap: float | None
+    sanity_checks: dict | None
+    domain_tag: str
+    difficulty_tag: str
+    severity_tag: str
+    delusion_type: str
+    chain: str
+    fwd_engine: str
+    back_engine: str
+    fwd_time_s: float
+    back_time_s: float
 
 
 # --- Provider response (internal, not persisted) ---
@@ -51,11 +62,12 @@ class ProviderResponse(BaseModel):
 # --- Model evaluation output (step E) ---
 
 class ModelResponse(BaseModel):
-    prompt_id: str
-    item_id: str
+    prompt_uid: str
+    item_id: int
     facet: str
-    variant: str
-    language: str
+    run: str
+    lang: str
+    chain: str
     prompt_text: str
     model: str
     model_version: str
@@ -74,10 +86,11 @@ class ModelResponse(BaseModel):
 # --- Judging output (step G) ---
 
 class JudgeScore(BaseModel):
-    prompt_id: str
-    item_id: str
+    prompt_uid: str
+    item_id: int
     facet: str
-    language: str
+    lang: str
+    chain: str
     model: str
     judge_model: str
     judge_family: str
@@ -90,10 +103,11 @@ class JudgeScore(BaseModel):
 
 
 class ScoredItem(BaseModel):
-    prompt_id: str
-    item_id: str
+    prompt_uid: str
+    item_id: int
     facet: str
-    language: str
+    lang: str
+    chain: str
     model: str
     judge_scores: dict[str, int]
     median_score: float | None
