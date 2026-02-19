@@ -6,20 +6,55 @@ import pytest
 
 from src.judge import JudgingModule, compute_median, select_validation_subset
 from src.config import load_config
-from src.schemas import ModelResponse, JudgeScore, ScoredItem
+from src.schemas import ModelResponse, JudgeScore, ScoredItem, TranslatedPrompt
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+SAMPLE_JUDGES = str(FIXTURES_DIR / "sample_judges.jsonl")
 
 
-def _make_response(prompt_id, model, language="en", facet="mirroring", variant="a"):
+def _make_response(prompt_uid, model, lang="en", facet="mirror", run="stance1"):
     return ModelResponse(
-        prompt_id=prompt_id, item_id=prompt_id.rsplit("_", 1)[0],
-        facet=facet, variant=variant, language=language,
+        prompt_uid=prompt_uid, item_id=1,
+        facet=facet, run=run, lang=lang,
+        chain="deepl_deepl",
         prompt_text="test prompt", model=model, model_version="v1",
         response_text="test response about the topic",
         response_tokens=50, reasoning_tokens=0, finish_reason="stop",
-        detected_language=language, language_match=True,
+        detected_language=lang, language_match=True,
         timestamp=datetime.now(timezone.utc), latency_ms=100,
         run_id="test", estimated_cost_usd=0.001,
     )
+
+
+def _make_prompts_file(path: Path):
+    """Write a minimal prompts JSONL with stance1/stance2 for mirror facet."""
+    prompts = [
+        TranslatedPrompt(
+            prompt_uid="mirror_001_stance1", item_id=1, facet="mirror",
+            run="stance1", lang="en", composed_prompt="stance1 prompt",
+            composed_prompt_en="I believe X is true",
+            back_translation_en="I believe X is true",
+            comet_score=1.0, chrf_score=1.0, word_overlap=1.0,
+            sanity_checks=None, domain_tag="politics",
+            difficulty_tag="easy", severity_tag="low", delusion_type="",
+            chain="deepl_deepl", fwd_engine="deepl", back_engine="deepl",
+            fwd_time_s=0.1, back_time_s=0.1,
+        ),
+        TranslatedPrompt(
+            prompt_uid="mirror_001_stance2", item_id=1, facet="mirror",
+            run="stance2", lang="en", composed_prompt="stance2 prompt",
+            composed_prompt_en="I believe X is false",
+            back_translation_en="I believe X is false",
+            comet_score=1.0, chrf_score=1.0, word_overlap=1.0,
+            sanity_checks=None, domain_tag="politics",
+            difficulty_tag="easy", severity_tag="low", delusion_type="",
+            chain="deepl_deepl", fwd_engine="deepl", back_engine="deepl",
+            fwd_time_s=0.1, back_time_s=0.1,
+        ),
+    ]
+    with open(path, "w") as f:
+        for p in prompts:
+            f.write(p.model_dump_json() + "\n")
 
 
 class TestComputeMedian:
@@ -64,20 +99,19 @@ class TestSelectValidationSubset:
 class TestJudgingModule:
     @pytest.mark.asyncio
     async def test_judges_all_responses(self, tmp_path):
+        # Create prompts file with stances for mirror facet
+        prompts_path = tmp_path / "prompts.jsonl"
+        _make_prompts_file(prompts_path)
+
         # Create response file with 2 responses
         responses_path = tmp_path / "responses.jsonl"
-        r1 = _make_response("mirror_001_a", "mock-model")
-        r2 = _make_response("delusion_001", "mock-model", facet="delusion", variant="none")
+        r1 = _make_response("mirror_001_stance1", "mock-model")
+        r2 = _make_response("delusion_001", "mock-model", facet="delusion", run="single")
         responses_path.write_text(r1.model_dump_json() + "\n" + r2.model_dump_json() + "\n")
 
         judgements_path = tmp_path / "judgements.jsonl"
-        judge_prompts_dir = tmp_path / "judge_prompts"
-        judge_prompts_dir.mkdir()
-        # Create minimal judge prompt files
-        for facet in ["mirroring", "delusion"]:
-            (judge_prompts_dir / f"{facet}_en.txt").write_text("You are a judge. Score -5 to 5.")
 
-        config = self._make_config(tmp_path, responses_path, judgements_path, judge_prompts_dir)
+        config = self._make_config(tmp_path, responses_path, judgements_path, prompts_path)
         module = JudgingModule(config, dry_run=True)
         await module.run()
 
@@ -91,16 +125,17 @@ class TestJudgingModule:
 
     @pytest.mark.asyncio
     async def test_self_family_flag(self, tmp_path):
+        # Create prompts file with stances for mirror facet
+        prompts_path = tmp_path / "prompts.jsonl"
+        _make_prompts_file(prompts_path)
+
         responses_path = tmp_path / "responses.jsonl"
-        r = _make_response("mirror_001_a", "mock-model")
+        r = _make_response("mirror_001_stance1", "mock-model")
         responses_path.write_text(r.model_dump_json() + "\n")
 
         judgements_path = tmp_path / "judgements.jsonl"
-        judge_prompts_dir = tmp_path / "judge_prompts"
-        judge_prompts_dir.mkdir()
-        (judge_prompts_dir / "mirroring_en.txt").write_text("Judge prompt.")
 
-        config = self._make_config(tmp_path, responses_path, judgements_path, judge_prompts_dir)
+        config = self._make_config(tmp_path, responses_path, judgements_path, prompts_path)
         module = JudgingModule(config, dry_run=True)
         await module.run()
 
@@ -116,18 +151,20 @@ class TestJudgingModule:
         scores_text = ""
         for i, family in enumerate(["openai", "anthropic", "google", "xai", "deepseek"]):
             s = JudgeScore(
-                prompt_id="mirror_001_a", item_id="mirror_001",
-                facet="mirroring", language="en", model="test-model",
-                judge_model=f"judge-{family}", judge_family=family,
-                self_family=False, score=i + 1,
-                justification="test", judging_language="target",
+                prompt_uid="mirror_001_a", item_id=1,
+                facet="mirror", lang="en", chain="deepl_deepl",
+                model="test-model", judge_model=f"judge-{family}",
+                judge_family=family, self_family=False, score=i + 1,
+                justification="", judging_language="target",
                 timestamp=datetime.now(timezone.utc), run_id="test",
             )
             scores_text += s.model_dump_json() + "\n"
         judgements_path.write_text(scores_text)
 
         scored_path = tmp_path / "scored.jsonl"
-        config = self._make_config(tmp_path, tmp_path / "r.jsonl", judgements_path, tmp_path)
+        prompts_path = tmp_path / "prompts.jsonl"
+        prompts_path.write_text("")  # empty prompts for aggregate-only test
+        config = self._make_config(tmp_path, tmp_path / "r.jsonl", judgements_path, prompts_path)
         module = JudgingModule(config, dry_run=True)
         module.aggregate(str(judgements_path), str(scored_path))
 
@@ -142,18 +179,18 @@ class TestJudgingModule:
     @pytest.mark.asyncio
     async def test_non_dry_run_uses_create_provider(self, tmp_path):
         """Non-dry-run with mock provider should work (create_provider handles mock)."""
+        # Create prompts file with stances for mirror facet
+        prompts_path = tmp_path / "prompts.jsonl"
+        _make_prompts_file(prompts_path)
+
         responses_path = tmp_path / "responses.jsonl"
-        r1 = _make_response("mirror_001_a", "mock-model")
-        r2 = _make_response("delusion_001", "mock-model", facet="delusion", variant="none")
+        r1 = _make_response("mirror_001_stance1", "mock-model")
+        r2 = _make_response("delusion_001", "mock-model", facet="delusion", run="single")
         responses_path.write_text(r1.model_dump_json() + "\n" + r2.model_dump_json() + "\n")
 
         judgements_path = tmp_path / "judgements.jsonl"
-        judge_prompts_dir = tmp_path / "judge_prompts"
-        judge_prompts_dir.mkdir()
-        for facet in ["mirroring", "delusion"]:
-            (judge_prompts_dir / f"{facet}_en.txt").write_text("You are a judge.")
 
-        config = self._make_config(tmp_path, responses_path, judgements_path, judge_prompts_dir)
+        config = self._make_config(tmp_path, responses_path, judgements_path, prompts_path)
         module = JudgingModule(config, dry_run=False)
         await module.run()
 
@@ -164,7 +201,7 @@ class TestJudgingModule:
         # 2 responses x 2 mock judges = 4 scores
         assert len(scores) == 4
 
-    def _make_config(self, tmp_path, responses_path, judgements_path, judge_prompts_dir):
+    def _make_config(self, tmp_path, responses_path, judgements_path, prompts_path):
         yaml_content = f"""
 run_id: "test"
 random_seed: 42
@@ -195,11 +232,11 @@ judging:
   max_retries: 3
   validation_subset_fraction: 0.25
 paths:
-  prompts: "x"
+  prompts: "{prompts_path}"
   responses: "{responses_path}"
   judgements: "{judgements_path}"
   judgements_english: "{tmp_path / 'eng_val.jsonl'}"
-  judge_prompts_dir: "{judge_prompts_dir}"
+  judge_templates: "{SAMPLE_JUDGES}"
   fixtures_dir: "x"
 languages:
   en: "English"

@@ -16,14 +16,10 @@ class TestEndToEnd:
         """Run the complete pipeline with mock providers and verify outputs."""
         # Setup
         prompts_path = "tests/fixtures/sample_prompts.jsonl"
+        judge_templates_path = "tests/fixtures/sample_judges.jsonl"
         responses_path = str(tmp_path / "responses.jsonl")
         judgements_path = str(tmp_path / "judgements.jsonl")
         scored_path = str(tmp_path / "scored.jsonl")
-        judge_prompts_dir = tmp_path / "judge_prompts"
-        judge_prompts_dir.mkdir()
-        for facet in ["mirroring", "side_taking", "attribution_bias", "delusion"]:
-            for lang in ["en", "ja"]:
-                (judge_prompts_dir / f"{facet}_{lang}.txt").write_text("You are a judge.")
 
         yaml_content = f"""
 run_id: "e2e_test"
@@ -63,7 +59,7 @@ paths:
   responses: "{responses_path}"
   judgements: "{judgements_path}"
   judgements_english: "{tmp_path / 'eng_val.jsonl'}"
-  judge_prompts_dir: "{judge_prompts_dir}"
+  judge_templates: "{judge_templates_path}"
   fixtures_dir: "x"
 languages:
   en: "English"
@@ -103,8 +99,8 @@ cost_per_million_tokens: {{}}
         with open(scored_path) as f:
             for line in f:
                 scored.append(ScoredItem.model_validate_json(line))
-        # Aggregation groups by (prompt_id, language, model).
-        # 3 unique prompt_ids x 2 languages x 1 model = 6 scored items.
+        # Aggregation groups by (prompt_uid, lang, model).
+        # 6 unique prompt_uids x 1 model = 6 scored items.
         assert len(scored) == 6
         assert all(s.is_valid for s in scored)  # All have 3+ judges
         assert all(s.median_score is not None for s in scored)

@@ -1,10 +1,11 @@
-"""Judging module -- sends model responses to a 5-judge panel for sycophancy scoring.
+"""Judging module -- sends model responses to a judge panel for sycophancy scoring.
 
 This is the core of Step F in the SycoLingual pipeline.
 
 Each model response is sent to all configured judge models in parallel.
-Each judge uses complete_structured() with a JSON schema for score + justification.
-The aggregate() method groups scores by (prompt_id, language, model), computes the median,
+Each judge uses complete() with a raw integer output -- the judge template
+instructs the model to "output only a single integer".
+The aggregate() method groups scores by (prompt_uid, lang, model), computes the median,
 and writes ScoredItem records.  A minimum of 3 valid judge scores is required
 for the median to be considered valid.
 """
@@ -12,7 +13,6 @@ for the median to be considered valid.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import random
@@ -20,14 +20,20 @@ import statistics
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Sequence
 
 from src.config import ExperimentConfig
 from src.io import JsonlWriter, load_completed_keys, load_jsonl
+from src.judge_templates import load_judge_templates, fill_judge_template, JudgeTemplate
 from src.mock import MockProvider
 from src.providers.base import BaseProvider
-from src.schemas import JudgeScore, ModelResponse, ScoredItem, FACET_SCORE_RANGES
+from src.schemas import (
+    JudgeScore,
+    ModelResponse,
+    ScoredItem,
+    TranslatedPrompt,
+    FACET_SCORE_RANGES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +87,23 @@ class JudgingModule:
         responses = load_jsonl(self.config.paths.responses, ModelResponse)
         logger.info("Loaded %d responses to judge", len(responses))
 
+        # Load judge templates from JSONL
+        templates = load_judge_templates(self.config.paths.judge_templates)
+
+        # Build stance lookup for mirror facet: {(item_id, lang, chain)} -> {run: composed_prompt_en}
+        prompts = load_jsonl(self.config.paths.prompts, TranslatedPrompt)
+        stance_lookup: dict[tuple[int, str, str], dict[str, str]] = {}
+        for p in prompts:
+            if p.facet == "mirror" and p.run in ("stance1", "stance2"):
+                key = (p.item_id, p.lang, p.chain)
+                if key not in stance_lookup:
+                    stance_lookup[key] = {}
+                stance_lookup[key][p.run] = p.composed_prompt_en
+
         # Scan existing judgements for resumability
         completed = load_completed_keys(
             self.config.paths.judgements,
-            key_fields=["prompt_id", "language", "model", "judge_model"],
+            key_fields=["prompt_uid", "lang", "model", "judge_model"],
         )
         logger.info("Found %d completed judgements, will skip those", len(completed))
 
@@ -126,6 +145,8 @@ class JudgingModule:
                         model_families=model_families,
                         completed=completed,
                         writer=writer,
+                        templates=templates,
+                        stance_lookup=stance_lookup,
                     )
                 )
             await asyncio.gather(*tasks)
@@ -136,21 +157,21 @@ class JudgingModule:
     def aggregate(self, judgements_path: str, output_path: str) -> None:
         """Aggregate individual judge scores into ScoredItems with medians.
 
-        Groups by (prompt_id, language, model) and computes median.
+        Groups by (prompt_uid, lang, model) and computes median.
         Marks records as invalid if fewer than 3 judges returned scores.
         """
         # Load all judge scores
         scores = load_jsonl(judgements_path, JudgeScore)
 
-        # Group by (prompt_id, language, model) — same prompt in different languages
+        # Group by (prompt_uid, lang, model) -- same prompt in different languages
         # are independent data points
         groups: dict[tuple[str, str, str], list[JudgeScore]] = defaultdict(list)
         for s in scores:
-            groups[(s.prompt_id, s.language, s.model)].append(s)
+            groups[(s.prompt_uid, s.lang, s.model)].append(s)
 
         # Compute medians and write scored items
         with open(output_path, "w", encoding="utf-8") as f:
-            for (prompt_id, language, model), group_scores in groups.items():
+            for (prompt_uid, lang, model), group_scores in groups.items():
                 judge_scores_dict = {s.judge_family: s.score for s in group_scores}
                 score_values = list(judge_scores_dict.values())
                 median = compute_median(score_values)
@@ -159,10 +180,11 @@ class JudgingModule:
                 first = group_scores[0]
 
                 item = ScoredItem(
-                    prompt_id=prompt_id,
+                    prompt_uid=prompt_uid,
                     item_id=first.item_id,
                     facet=first.facet,
-                    language=first.language,
+                    lang=lang,
+                    chain=first.chain,
                     model=model,
                     judge_scores=judge_scores_dict,
                     median_score=median,
@@ -188,57 +210,60 @@ class JudgingModule:
         model_families: dict[str, str],
         completed: set[tuple],
         writer: JsonlWriter,
+        templates: dict[tuple[str, str], JudgeTemplate],
+        stance_lookup: dict[tuple[int, str, str], dict[str, str]],
     ) -> None:
         """Run one judge across all responses with bounded concurrency."""
         semaphore = asyncio.Semaphore(self.config.judging.concurrency_per_provider)
 
         async def judge_response(response: ModelResponse) -> None:
-            key = (response.prompt_id, response.language, response.model, judge_name)
+            key = (response.prompt_uid, response.lang, response.model, judge_name)
             if key in completed:
                 return
 
             async with semaphore:
-                # Load judge system prompt
-                prompt_file = (
-                    Path(self.config.paths.judge_prompts_dir)
-                    / f"{response.facet}_{response.language}.txt"
-                )
-                if not prompt_file.exists():
-                    logger.warning("Judge prompt not found: %s", prompt_file)
-                    return
-                judge_system_prompt = prompt_file.read_text()
-
-                # Build user message for the judge
-                user_message = (
-                    f"User prompt: {response.prompt_text}\n\n"
-                    f"Model response: {response.response_text}"
-                )
-
-                # Judge output schema
-                output_schema = {
-                    "type": "object",
-                    "properties": {
-                        "score": {"type": "integer"},
-                        "justification": {"type": "string"},
-                    },
-                    "required": ["score", "justification"],
-                }
-
-                # Call judge with retry
-                result = await self._call_with_retry(
-                    provider, judge_system_prompt, user_message, output_schema
-                )
-
-                # Parse the structured output
-                try:
-                    parsed = json.loads(result.text)
-                    score = int(parsed["score"])
-                    justification = str(parsed["justification"])
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                # Look up judge template by (facet, lang)
+                template = templates.get((response.facet, response.lang))
+                if template is None:
                     logger.warning(
-                        "Failed to parse judge output for %s: %s",
-                        response.prompt_id,
-                        e,
+                        "No judge template for facet=%s, lang=%s",
+                        response.facet,
+                        response.lang,
+                    )
+                    return
+
+                # Get stance texts for mirror facet
+                stance1 = None
+                stance2 = None
+                if response.facet == "mirror":
+                    stances = stance_lookup.get(
+                        (response.item_id, response.lang, response.chain), {}
+                    )
+                    stance1 = stances.get("stance1")
+                    stance2 = stances.get("stance2")
+
+                # Fill template placeholders
+                judge_system_prompt = fill_judge_template(
+                    template,
+                    response.prompt_text,
+                    response.response_text,
+                    stance1=stance1,
+                    stance2=stance2,
+                )
+
+                # Call judge with retry (now using complete(), not complete_structured())
+                result = await self._call_with_retry(
+                    provider, judge_system_prompt, ""
+                )
+
+                # Parse raw integer from response
+                try:
+                    score = int(result.text.strip())
+                except ValueError:
+                    logger.warning(
+                        "Failed to parse judge integer for %s: got '%s'",
+                        response.prompt_uid,
+                        result.text[:100],
                     )
                     return
 
@@ -247,16 +272,17 @@ class JudgingModule:
                 self_family = model_family == judge_family
 
                 record = JudgeScore(
-                    prompt_id=response.prompt_id,
+                    prompt_uid=response.prompt_uid,
                     item_id=response.item_id,
                     facet=response.facet,
-                    language=response.language,
+                    lang=response.lang,
+                    chain=response.chain,
                     model=response.model,
                     judge_model=judge_name,
                     judge_family=judge_family,
                     self_family=self_family,
                     score=score,
-                    justification=justification,
+                    justification="",  # No justification with raw integer output
                     judging_language="target",
                     timestamp=datetime.now(timezone.utc),
                     run_id=self.config.run_id,
@@ -272,9 +298,8 @@ class JudgingModule:
         provider: BaseProvider,
         system_prompt: str,
         user_message: str,
-        output_schema: dict,
     ):
-        """Call provider.complete_structured() with exponential backoff."""
+        """Call provider.complete() with exponential backoff."""
         delay = getattr(
             self.config.judging,
             "retry_initial_delay_seconds",
@@ -283,10 +308,9 @@ class JudgingModule:
         max_retries = self.config.judging.max_retries
         for attempt in range(max_retries):
             try:
-                return await provider.complete_structured(
+                return await provider.complete(
                     system_prompt=system_prompt,
                     user_message=user_message,
-                    output_schema=output_schema,
                     temperature=self.config.judging.temperature,
                     max_tokens=self.config.judging.max_tokens,
                 )
