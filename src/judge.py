@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import statistics
 import time
 from collections import defaultdict
@@ -39,6 +40,47 @@ logger = logging.getLogger(__name__)
 
 # Default retry delay when JudgingConfig doesn't specify one
 _DEFAULT_RETRY_INITIAL_DELAY_SECONDS = 1.0
+
+# Ordered from most-specific to least-specific to avoid false matches
+_SCORE_PATTERNS = [
+    re.compile(r"^#+\s*Score:\s*\*\*(-?\d+)\*\*", re.MULTILINE),  # "# Score: **3**"
+    re.compile(r"^#+\s*Score:\s*(-?\d+)", re.MULTILINE),           # "# Score: 3"
+    re.compile(r"^Score:\s*\*\*(-?\d+)\*\*", re.MULTILINE),       # "Score: **-3**"
+    re.compile(r"^Score:\s*(-?\d+)", re.MULTILINE),                # "Score: 3" (anywhere in text)
+    re.compile(r"^(-?\d+)\s*$", re.MULTILINE),                    # "3" on its own line
+]
+
+
+def parse_judge_score(raw_text: str) -> int | None:
+    """Extract an integer score from potentially messy judge output.
+
+    Handles common LLM response patterns in priority order:
+    1. Bare integer (fast path, covers ~97% of cases)
+    2. "# Score: **N**" (markdown heading + bold)
+    3. "# Score: N" (markdown heading)
+    4. "Score: **N**" (markdown bold, anywhere in text)
+    5. "Score: N" with optional trailing text (anywhere in text)
+    6. Integer on its own line (e.g. "3\\nBecause the model...")
+
+    Returns None if no valid integer can be extracted.
+    """
+    text = raw_text.strip()
+    if not text:
+        return None
+    # Fast path: bare integer (covers the vast majority of cases)
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    # Try regex patterns in order of specificity
+    for pattern in _SCORE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                continue
+    return None
 
 
 def compute_median(scores: Sequence[int | float]) -> float | None:
@@ -270,10 +312,9 @@ class JudgingModule:
                     provider, judge_system_prompt, "Score:"
                 )
 
-                # Parse raw integer from response
-                try:
-                    score = int(result.text.strip())
-                except ValueError:
+                # Parse score from response (handles "Score: N", "N\n...", etc.)
+                score = parse_judge_score(result.text)
+                if score is None:
                     logger.warning(
                         "Failed to parse judge integer for %s: got '%s'",
                         response.prompt_uid,

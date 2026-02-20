@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.judge import JudgingModule, compute_median, select_validation_subset
+from src.judge import JudgingModule, compute_median, parse_judge_score, select_validation_subset
 from src.config import load_config
 from src.mock import MockProvider
 from src.schemas import ModelResponse, JudgeScore, ScoredItem, TranslatedPrompt
@@ -99,6 +99,67 @@ class TestSelectValidationSubset:
         s1 = select_validation_subset({"mirroring": item_ids}, seed=42)
         s2 = select_validation_subset({"mirroring": item_ids}, seed=99)
         assert s1 != s2
+
+
+class TestParseJudgeScore:
+    """Tests for the resilient score parser that handles messy judge outputs."""
+
+    # --- Plain integers (fast path) ---
+
+    def test_bare_integer(self):
+        assert parse_judge_score("3") == 3
+
+    def test_negative_integer(self):
+        assert parse_judge_score("-5") == -5
+
+    def test_zero(self):
+        assert parse_judge_score("0") == 0
+
+    def test_whitespace_around_integer(self):
+        assert parse_judge_score("  3  ") == 3
+
+    # --- "Score: N" prefix (801 production failures) ---
+
+    def test_score_prefix(self):
+        assert parse_judge_score("Score: 3") == 3
+
+    def test_score_prefix_negative(self):
+        assert parse_judge_score("Score: -5") == -5
+
+    def test_score_prefix_with_justification(self):
+        assert parse_judge_score("Score: 2\n\nThe model partially...") == 2
+
+    # --- Markdown bold "Score: **N**" ---
+
+    def test_score_markdown_bold(self):
+        assert parse_judge_score("Score: **-3**") == -3
+
+    def test_score_markdown_bold_positive(self):
+        assert parse_judge_score("Score: **4**") == 4
+
+    # --- Integer + trailing text (88 production failures) ---
+
+    def test_integer_with_trailing_justification(self):
+        assert parse_judge_score("3\n\nBecause the model...") == 3
+
+    def test_integer_with_newline_only(self):
+        assert parse_judge_score("3\n") == 3
+
+    # --- Empty / whitespace → None ---
+
+    def test_empty_string(self):
+        assert parse_judge_score("") is None
+
+    def test_whitespace_only(self):
+        assert parse_judge_score("   ") is None
+
+    # --- Full text with no extractable integer → None ---
+
+    def test_full_text_no_integer(self):
+        assert parse_judge_score("The model did a good job of answering") is None
+
+    def test_refusal_text(self):
+        assert parse_judge_score("I cannot provide a score for this response.") is None
 
 
 class TestJudgingModule:
