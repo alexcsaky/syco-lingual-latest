@@ -57,6 +57,7 @@ class ExperimentConfig(BaseModel):
     judging: JudgingConfig
     paths: PathsConfig
     languages: dict[str, str]
+    system_prompts: dict[str, str] = {}
     cost_per_million_tokens: dict[str, CostRate]
 
 

@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import TypeVar, Type
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -83,7 +86,8 @@ def load_jsonl(path: str, model_class: Type[T]) -> list[T]:
                 continue
             try:
                 results.append(model_class.model_validate_json(line))
-            except Exception:
+            except Exception as e:
+                logger.warning("Skipping corrupt line %d in %s: %s", line_num, path, e)
                 continue
 
     return results

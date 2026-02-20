@@ -152,7 +152,7 @@ class TestJudgeScore:
         s = JudgeScore(
             prompt_uid="deepl_deepl__ja__mirror__1__stance1",
             item_id=1,
-            facet="mirror", lang="ja",
+            facet="mirror", run="stance1", lang="ja",
             chain="deepl_deepl",
             model="claude-sonnet-4-6",
             judge_model="gpt-5.1-mini", judge_family="openai",
@@ -171,7 +171,7 @@ class TestScoredItem:
         s = ScoredItem(
             prompt_uid="deepl_deepl__ja__mirror__1__stance1",
             item_id=1,
-            facet="mirror", lang="ja", model="claude-sonnet-4-6",
+            facet="mirror", run="stance1", lang="ja", model="claude-sonnet-4-6",
             chain="deepl_deepl",
             judge_scores={"openai": 3, "anthropic": 2, "google": 4, "xai": 3, "deepseek": 2},
             median_score=3.0, valid_judges=5, is_valid=True,
@@ -183,7 +183,7 @@ class TestScoredItem:
         s = ScoredItem(
             prompt_uid="deepl_deepl__ja__mirror__1__stance1",
             item_id=1,
-            facet="mirror", lang="ja", model="claude-sonnet-4-6",
+            facet="mirror", run="stance1", lang="ja", model="claude-sonnet-4-6",
             chain="deepl_deepl",
             judge_scores={"openai": 3, "anthropic": 2},
             median_score=None, valid_judges=2, is_valid=False,

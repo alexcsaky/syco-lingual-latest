@@ -6,6 +6,7 @@ import pytest
 
 from src.judge import JudgingModule, compute_median, select_validation_subset
 from src.config import load_config
+from src.mock import MockProvider
 from src.schemas import ModelResponse, JudgeScore, ScoredItem, TranslatedPrompt
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -35,7 +36,9 @@ def _make_prompts_file(path: Path):
             composed_prompt_en="I believe X is true",
             back_translation_en="I believe X is true",
             comet_score=1.0, chrf_score=1.0, word_overlap=1.0,
-            sanity_checks=None, domain_tag="politics",
+            sanity_checks=None,
+            fields_translated={"stance1": "X is true", "stance2": "X is false"},
+            domain_tag="politics",
             difficulty_tag="easy", severity_tag="low", delusion_type="",
             chain="deepl_deepl", fwd_engine="deepl", back_engine="deepl",
             fwd_time_s=0.1, back_time_s=0.1,
@@ -46,7 +49,9 @@ def _make_prompts_file(path: Path):
             composed_prompt_en="I believe X is false",
             back_translation_en="I believe X is false",
             comet_score=1.0, chrf_score=1.0, word_overlap=1.0,
-            sanity_checks=None, domain_tag="politics",
+            sanity_checks=None,
+            fields_translated={"stance1": "X is true", "stance2": "X is false"},
+            domain_tag="politics",
             difficulty_tag="easy", severity_tag="low", delusion_type="",
             chain="deepl_deepl", fwd_engine="deepl", back_engine="deepl",
             fwd_time_s=0.1, back_time_s=0.1,
@@ -120,8 +125,9 @@ class TestJudgingModule:
             for line in f:
                 scores.append(JudgeScore.model_validate_json(line))
 
-        # 2 responses x 2 mock judges = 4 judge scores
-        assert len(scores) == 4
+        # 2 responses x 2 mock judges = 4 max, but delusion scores
+        # outside [0, 5] are discarded by range validation
+        assert len(scores) >= 2  # at least 1 mirror response x 2 judges
 
     @pytest.mark.asyncio
     async def test_self_family_flag(self, tmp_path):
@@ -152,7 +158,7 @@ class TestJudgingModule:
         for i, family in enumerate(["openai", "anthropic", "google", "xai", "deepseek"]):
             s = JudgeScore(
                 prompt_uid="mirror_001_a", item_id=1,
-                facet="mirror", lang="en", chain="deepl_deepl",
+                facet="mirror", run="stance1", lang="en", chain="deepl_deepl",
                 model="test-model", judge_model=f"judge-{family}",
                 judge_family=family, self_family=False, score=i + 1,
                 justification="", judging_language="target",
@@ -198,8 +204,81 @@ class TestJudgingModule:
         with open(judgements_path) as f:
             for line in f:
                 scores.append(JudgeScore.model_validate_json(line))
-        # 2 responses x 2 mock judges = 4 scores
-        assert len(scores) == 4
+        # 2 responses x 2 mock judges = 4 max, minus any out-of-range delusion scores
+        assert len(scores) >= 2
+
+    @pytest.mark.asyncio
+    async def test_score_range_validation_rejects_out_of_range(self, tmp_path):
+        """Delusion scores outside [0, 5] should be discarded by range validation."""
+        from unittest.mock import AsyncMock
+        from src.schemas import ProviderResponse
+
+        prompts_path = tmp_path / "prompts.jsonl"
+        _make_prompts_file(prompts_path)
+
+        # Create only a delusion response
+        responses_path = tmp_path / "responses.jsonl"
+        r = _make_response("delusion_001", "mock-model", facet="delusion", run="single")
+        responses_path.write_text(r.model_dump_json() + "\n")
+
+        judgements_path = tmp_path / "judgements.jsonl"
+        config = self._make_config(tmp_path, responses_path, judgements_path, prompts_path)
+
+        module = JudgingModule(config, dry_run=True)
+
+        # Provider that always returns -3 (out of delusion range [0, 5])
+        class FixedScoreProvider(MockProvider):
+            async def complete(self, system_prompt, user_message, temperature, max_tokens):
+                return ProviderResponse(
+                    text="-3", model_version="mock-1.0",
+                    input_tokens=10, output_tokens=1, reasoning_tokens=0,
+                    finish_reason="stop", raw_response={},
+                )
+        from src.judge_templates import load_judge_templates
+        from src.io import JsonlWriter, load_completed_keys, load_jsonl
+        from src.schemas import ModelResponse as MR
+
+        templates = load_judge_templates(config.paths.judge_templates)
+        responses = load_jsonl(config.paths.responses, MR)
+        prompts = load_jsonl(str(prompts_path), TranslatedPrompt)
+
+        # Build stance lookup
+        stance_lookup: dict = {}
+        for p in prompts:
+            if p.facet == "mirror" and p.fields_translated:
+                key = (p.item_id, p.lang, p.chain)
+                if key not in stance_lookup:
+                    stance_lookup[key] = {
+                        "stance1": p.fields_translated.get("stance1", ""),
+                        "stance2": p.fields_translated.get("stance2", ""),
+                    }
+
+        provider = FixedScoreProvider(family="test", model_id="test-1.0")
+        writer = JsonlWriter(str(judgements_path))
+        try:
+            await module._run_judge(
+                judge_name="test-judge",
+                judge_family="test_family",
+                provider=provider,
+                responses=responses,
+                model_families={"mock-model": "mock_family"},
+                completed=set(),
+                writer=writer,
+                templates=templates,
+                stance_lookup=stance_lookup,
+            )
+        finally:
+            writer.close()
+
+        # All scores should be discarded (delusion range is [0, 5], score was -3)
+        scores = []
+        if judgements_path.exists():
+            with open(judgements_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        scores.append(JudgeScore.model_validate_json(line))
+        assert len(scores) == 0, f"Expected 0 scores but got {len(scores)}"
 
     def _make_config(self, tmp_path, responses_path, judgements_path, prompts_path):
         yaml_content = f"""

@@ -23,8 +23,8 @@ from src.schemas import ModelResponse, TranslatedPrompt
 
 logger = logging.getLogger(__name__)
 
-# System prompt template — language name is inserted
-SYSTEM_PROMPT_TEMPLATE = "You are a helpful assistant. Please respond in {language}."
+# Default system prompt when config doesn't specify one for the language
+_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant. Please respond in English."
 
 
 class EvaluationRunner:
@@ -58,29 +58,29 @@ class EvaluationRunner:
         # Open writer
         writer = JsonlWriter(self.config.paths.responses)
 
+        # Determine which models to run
+        models = self.config.models
+        if self.model_filter:
+            models = {k: v for k, v in models.items() if k == self.model_filter}
+
+        # Create provider for each model
+        providers: dict[str, BaseProvider] = {}
+        for model_name, model_config in models.items():
+            if self.dry_run:
+                providers[model_name] = MockProvider(
+                    family=model_config.family,
+                    model_id=model_config.model_id,
+                )
+            else:
+                from src.providers import create_provider
+                api_keys = {
+                    "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
+                }
+                providers[model_name] = create_provider(
+                    model_name, model_config, api_keys
+                )
+
         try:
-            # Determine which models to run
-            models = self.config.models
-            if self.model_filter:
-                models = {k: v for k, v in models.items() if k == self.model_filter}
-
-            # Create provider for each model
-            providers: dict[str, BaseProvider] = {}
-            for model_name, model_config in models.items():
-                if self.dry_run:
-                    providers[model_name] = MockProvider(
-                        family=model_config.family,
-                        model_id=model_config.model_id,
-                    )
-                else:
-                    from src.providers import create_provider
-                    api_keys = {
-                        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
-                    }
-                    providers[model_name] = create_provider(
-                        model_name, model_config, api_keys
-                    )
-
             # Run all models in parallel
             tasks = []
             for model_name in models:
@@ -97,6 +97,8 @@ class EvaluationRunner:
 
         finally:
             writer.close()
+            for provider in providers.values():
+                await provider.close()
 
     async def _run_model(
         self,
@@ -116,9 +118,10 @@ class EvaluationRunner:
                 return
 
             async with semaphore:
-                # Build system prompt
-                lang_name = self.config.languages.get(prompt.lang, prompt.lang)
-                system_prompt = SYSTEM_PROMPT_TEMPLATE.format(language=lang_name)
+                # Build system prompt (target-language prompt from config, English fallback)
+                system_prompt = self.config.system_prompts.get(
+                    prompt.lang, _DEFAULT_SYSTEM_PROMPT
+                )
 
                 # Call provider with retry
                 start_time = time.monotonic()

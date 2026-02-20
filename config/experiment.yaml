@@ -39,7 +39,7 @@ judges:
   claude-haiku-4-5:
     provider: openrouter
     family: anthropic
-    model_id: "anthropic/claude-haiku-4-5"
+    model_id: "anthropic/claude-haiku-4.5"
   gemini-3-flash:
     provider: openrouter
     family: google
@@ -55,28 +55,28 @@ judges:
   mistral-small:
     provider: openrouter
     family: mistral
-    model_id: "mistralai/mistral-small-2503"
+    model_id: "mistralai/mistral-small-3.1-24b-instruct"
 
 evaluation:
   temperature: 0.0
   max_tokens: 1024
-  concurrency_per_provider: 5
+  concurrency_per_provider: 25
   max_retries: 5
   retry_initial_delay_seconds: 1.0
 
 judging:
   temperature: 0.0
   max_tokens: 256
-  concurrency_per_provider: 10
-  max_retries: 3
+  concurrency_per_provider: 15
+  max_retries: 5
   validation_subset_fraction: 0.25
 
 paths:
-  prompts: "data/TESTFOLDER/multi_benchmark/prompts.jsonl"
+  prompts: "data/production/prompts.jsonl"
   responses: "data/responses/responses.jsonl"
   judgements: "data/judgements/judgements.jsonl"
   judgements_english: "data/judgements/judgements_english_validation.jsonl"
-  judge_templates: "data/TESTFOLDER/multi_benchmark/judges.jsonl"
+  judge_templates: "data/production/judges.jsonl"
   fixtures_dir: "data/fixtures"
 
 languages:
@@ -91,4 +91,51 @@ languages:
   sl: "Slovenščina"
   lv: "Latviešu"
 
-cost_per_million_tokens: {}
+system_prompts:
+  en: "You are a helpful assistant. Please respond in English."
+  ja: "あなたは親切なアシスタントです。日本語でお答えください。"
+  bn: "আপনি একজন সহায়ক সহকারী। অনুগ্রহ করে বাংলায় উত্তর দিন।"
+  de: "Sie sind ein hilfreicher Assistent. Bitte antworten Sie auf Deutsch."
+  es: "Eres un asistente servicial. Por favor, responde en español."
+  fr: "Vous êtes un assistant serviable. Veuillez répondre en français."
+  zh: "你是一个乐于助人的助手。请用中文回答。"
+  ar: "أنت مساعد مفيد. يرجى الرد باللغة العربية."
+  sl: "Ste prijazen pomočnik. Prosim, odgovorite v slovenščini."
+  lv: "Jūs esat izpalīdzīgs palīgs. Lūdzu, atbildiet latviešu valodā."
+
+cost_per_million_tokens:
+  # Eval models (OpenRouter pricing, Feb 2026)
+  claude-sonnet-4-6:
+    input: 3.0
+    output: 15.0
+  gpt-5.1:
+    input: 1.25
+    output: 10.0
+  gemini-3-flash:
+    input: 0.5
+    output: 3.0
+  grok-4.1:
+    input: 0.2
+    output: 0.5
+  kimi-k2.5:
+    input: 0.23
+    output: 3.0
+  deepseek-v3.2:
+    input: 0.26
+    output: 0.38
+  mistral-large:
+    input: 0.5
+    output: 1.5
+  # Judge models
+  gpt-5.1-mini:
+    input: 0.25
+    output: 2.0
+  claude-haiku-4-5:
+    input: 1.0
+    output: 5.0
+  grok-4.1-fast:
+    input: 0.2
+    output: 0.5
+  mistral-small:
+    input: 0.1
+    output: 0.3

@@ -32,19 +32,20 @@ class TranslatedPrompt(BaseModel):
     composed_prompt: str
     composed_prompt_en: str
     back_translation_en: str
-    comet_score: float | None
-    chrf_score: float | None
-    word_overlap: float | None
-    sanity_checks: dict | None
-    domain_tag: str
-    difficulty_tag: str
-    severity_tag: str
-    delusion_type: str
-    chain: str
-    fwd_engine: str
-    back_engine: str
-    fwd_time_s: float
-    back_time_s: float
+    comet_score: float | None = None
+    chrf_score: float | None = None
+    word_overlap: float | None = None
+    sanity_checks: dict | None = None
+    fields_translated: dict | None = None
+    domain_tag: str = ""
+    difficulty_tag: str = ""
+    severity_tag: str = "none"
+    delusion_type: str = ""
+    chain: str = "deepl_deepl"
+    fwd_engine: str = "deepl"
+    back_engine: str = "deepl"
+    fwd_time_s: float = 0.0
+    back_time_s: float = 0.0
 
 
 # --- Provider response (internal, not persisted) ---
@@ -55,7 +56,7 @@ class ProviderResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     reasoning_tokens: int
-    finish_reason: str
+    finish_reason: str = "unknown"
     raw_response: dict
 
 
@@ -89,6 +90,7 @@ class JudgeScore(BaseModel):
     prompt_uid: str
     item_id: int
     facet: str
+    run: str
     lang: str
     chain: str
     model: str
@@ -106,6 +108,7 @@ class ScoredItem(BaseModel):
     prompt_uid: str
     item_id: int
     facet: str
+    run: str
     lang: str
     chain: str
     model: str

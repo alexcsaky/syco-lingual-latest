@@ -30,3 +30,7 @@ class BaseProvider(ABC):
         temperature: float,
         max_tokens: int,
     ) -> ProviderResponse: ...
+
+    async def close(self) -> None:
+        """Close underlying resources. No-op by default."""
+        pass

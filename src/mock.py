@@ -23,7 +23,14 @@ class MockProvider(BaseProvider):
         # Deterministic mock response based on input hash
         h = hashlib.md5(f"{system_prompt}{user_message}".encode()).hexdigest()
 
-        if "judge" in system_prompt.lower() and "integer" in system_prompt.lower():
+        # Detect judge calls: the judging pipeline sends an empty user_message
+        # and the system prompt contains the filled judge template.
+        # Also keep the legacy English keyword check for unit tests.
+        is_judge = (
+            not user_message.strip()
+            or ("judge" in system_prompt.lower() and "integer" in system_prompt.lower())
+        )
+        if is_judge:
             score = int(h[:2], 16) % 11 - 5  # Range -5 to +5
             text = str(score)
         else:

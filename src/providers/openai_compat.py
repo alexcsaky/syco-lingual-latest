@@ -29,6 +29,7 @@ class OpenAICompatibleProvider(BaseProvider):
         super().__init__(family=family, model_id=model_id)
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._client = httpx.AsyncClient(timeout=120.0)
 
     def _build_headers(self) -> dict[str, str]:
         headers = {
@@ -43,11 +44,11 @@ class OpenAICompatibleProvider(BaseProvider):
     def _build_messages(self, system_prompt: str, user_message: str) -> list[dict]:
         """Build messages array with prompt caching for OpenRouter.
 
-        When routing through OpenRouter, uses content array format with
-        cache_control on the system prompt. This enables Anthropic prompt
-        caching (other providers cache automatically).
+        Only uses content-array format with cache_control for Anthropic models,
+        since it's the only provider that benefits from it.  Other providers
+        (Mistral via Cloudflare, etc.) reject the content-array format.
         """
-        if _OPENROUTER_HOST in self._base_url:
+        if _OPENROUTER_HOST in self._base_url and self.family == "anthropic":
             system_msg = {
                 "role": "system",
                 "content": [
@@ -63,6 +64,23 @@ class OpenAICompatibleProvider(BaseProvider):
 
         return [system_msg, {"role": "user", "content": user_message}]
 
+    def _base_payload(
+        self, system_prompt: str, user_message: str, temperature: float, max_tokens: int,
+    ) -> dict:
+        """Build the common request payload, including OpenRouter-specific fields."""
+        payload: dict = {
+            "model": self.model_id,
+            "messages": self._build_messages(system_prompt, user_message),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        # Disable reasoning/thinking tokens only for model families that have
+        # reasoning ON by default (DeepSeek, Moonshot/Kimi).  Other providers
+        # either don't support the parameter or reject "none" as a value.
+        if _OPENROUTER_HOST in self._base_url and self.family in ("deepseek", "moonshot"):
+            payload["reasoning"] = {"effort": "none"}
+        return payload
+
     async def complete(
         self,
         system_prompt: str,
@@ -70,32 +88,31 @@ class OpenAICompatibleProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
     ) -> ProviderResponse:
-        payload = {
-            "model": self.model_id,
-            "messages": self._build_messages(system_prompt, user_message),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+        payload = self._base_payload(system_prompt, user_message, temperature, max_tokens)
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self._base_url}/chat/completions",
-                headers=self._build_headers(),
-                json=payload,
+        response = await self._client.post(
+            f"{self._base_url}/chat/completions",
+            headers=self._build_headers(),
+            json=payload,
+        )
+        if response.status_code != 200:
+            logger.error(
+                "API error %d from %s: %s",
+                response.status_code, self.model_id, response.text[:500],
             )
-            response.raise_for_status()
-            data = response.json()
+        response.raise_for_status()
+        data = response.json()
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
 
         return ProviderResponse(
-            text=choice["message"]["content"],
+            text=choice["message"]["content"] or "",
             model_version=data.get("model", self.model_id),
             input_tokens=usage.get("prompt_tokens", 0),
             output_tokens=usage.get("completion_tokens", 0),
             reasoning_tokens=usage.get("reasoning_tokens", 0),
-            finish_reason=choice.get("finish_reason", "unknown"),
+            finish_reason=choice.get("finish_reason") or "unknown",
             raw_response=data,
         )
 
@@ -108,29 +125,23 @@ class OpenAICompatibleProvider(BaseProvider):
         max_tokens: int,
     ) -> ProviderResponse:
         """Call with JSON response format. Uses json_schema response_format."""
-        payload = {
-            "model": self.model_id,
-            "messages": self._build_messages(system_prompt, user_message),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "judge_output",
-                    "schema": output_schema,
-                    "strict": True,
-                },
+        payload = self._base_payload(system_prompt, user_message, temperature, max_tokens)
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "judge_output",
+                "schema": output_schema,
+                "strict": True,
             },
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self._base_url}/chat/completions",
-                headers=self._build_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self._base_url}/chat/completions",
+            headers=self._build_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -144,3 +155,7 @@ class OpenAICompatibleProvider(BaseProvider):
             finish_reason=choice.get("finish_reason", "unknown"),
             raw_response=data,
         )
+
+    async def close(self) -> None:
+        """Close the persistent httpx client."""
+        await self._client.aclose()

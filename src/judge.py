@@ -90,15 +90,18 @@ class JudgingModule:
         # Load judge templates from JSONL
         templates = load_judge_templates(self.config.paths.judge_templates)
 
-        # Build stance lookup for mirror facet: {(item_id, lang, chain)} -> {run: composed_prompt_en}
+        # Build stance lookup for mirror facet: {(item_id, lang, chain)} -> {"stance1": ..., "stance2": ...}
+        # Uses fields_translated which carries target-language bare stance text
         prompts = load_jsonl(self.config.paths.prompts, TranslatedPrompt)
         stance_lookup: dict[tuple[int, str, str], dict[str, str]] = {}
         for p in prompts:
-            if p.facet == "mirror" and p.run in ("stance1", "stance2"):
+            if p.facet == "mirror" and p.fields_translated:
                 key = (p.item_id, p.lang, p.chain)
                 if key not in stance_lookup:
-                    stance_lookup[key] = {}
-                stance_lookup[key][p.run] = p.composed_prompt_en
+                    stance_lookup[key] = {
+                        "stance1": p.fields_translated.get("stance1", ""),
+                        "stance2": p.fields_translated.get("stance2", ""),
+                    }
 
         # Scan existing judgements for resumability
         completed = load_completed_keys(
@@ -110,24 +113,24 @@ class JudgingModule:
         # Open writer
         writer = JsonlWriter(self.config.paths.judgements)
 
-        try:
-            # Create judge providers
-            judges: dict[str, BaseProvider] = {}
-            for judge_name, judge_config in self.config.judges.items():
-                if self.dry_run:
-                    judges[judge_name] = MockProvider(
-                        family=judge_config.family,
-                        model_id=judge_config.model_id,
-                    )
-                else:
-                    from src.providers import create_provider
-                    api_keys = {
-                        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
-                    }
-                    judges[judge_name] = create_provider(
-                        judge_name, judge_config, api_keys
-                    )
+        # Create judge providers
+        judges: dict[str, BaseProvider] = {}
+        for judge_name, judge_config in self.config.judges.items():
+            if self.dry_run:
+                judges[judge_name] = MockProvider(
+                    family=judge_config.family,
+                    model_id=judge_config.model_id,
+                )
+            else:
+                from src.providers import create_provider
+                api_keys = {
+                    "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
+                }
+                judges[judge_name] = create_provider(
+                    judge_name, judge_config, api_keys
+                )
 
+        try:
             # Build model family lookup from config
             model_families = {
                 name: cfg.family for name, cfg in self.config.models.items()
@@ -153,6 +156,8 @@ class JudgingModule:
 
         finally:
             writer.close()
+            for judge in judges.values():
+                await judge.close()
 
     def aggregate(self, judgements_path: str, output_path: str) -> None:
         """Aggregate individual judge scores into ScoredItems with medians.
@@ -183,6 +188,7 @@ class JudgingModule:
                     prompt_uid=prompt_uid,
                     item_id=first.item_id,
                     facet=first.facet,
+                    run=first.run,
                     lang=lang,
                     chain=first.chain,
                     model=model,
@@ -241,6 +247,12 @@ class JudgingModule:
                     )
                     stance1 = stances.get("stance1")
                     stance2 = stances.get("stance2")
+                    if not stance1 or not stance2:
+                        logger.warning(
+                            "Missing stance text for mirror item_id=%d lang=%s — "
+                            "judge template will have unfilled placeholders",
+                            response.item_id, response.lang,
+                        )
 
                 # Fill template placeholders
                 judge_system_prompt = fill_judge_template(
@@ -252,8 +264,10 @@ class JudgingModule:
                 )
 
                 # Call judge with retry (now using complete(), not complete_structured())
+                # Use a minimal non-empty user message -- some providers (Anthropic,
+                # Mistral) reject requests with empty user content.
                 result = await self._call_with_retry(
-                    provider, judge_system_prompt, ""
+                    provider, judge_system_prompt, "Score:"
                 )
 
                 # Parse raw integer from response
@@ -267,6 +281,15 @@ class JudgingModule:
                     )
                     return
 
+                # Validate score is within expected range for the facet
+                score_range = FACET_SCORE_RANGES.get(response.facet)
+                if score_range and not (score_range[0] <= score <= score_range[1]):
+                    logger.warning(
+                        "Score %d out of range %s for facet=%s — discarding",
+                        score, score_range, response.facet,
+                    )
+                    return
+
                 # Compute self_family
                 model_family = model_families.get(response.model, "")
                 self_family = model_family == judge_family
@@ -275,6 +298,7 @@ class JudgingModule:
                     prompt_uid=response.prompt_uid,
                     item_id=response.item_id,
                     facet=response.facet,
+                    run=response.run,
                     lang=response.lang,
                     chain=response.chain,
                     model=response.model,
@@ -290,7 +314,16 @@ class JudgingModule:
 
                 await writer.write(record)
 
-        tasks = [judge_response(r) for r in responses]
+        async def safe_judge(r: ModelResponse) -> None:
+            try:
+                await judge_response(r)
+            except Exception as e:
+                logger.error(
+                    "Judge %s permanently failed for %s/%s/%s: %s",
+                    judge_name, r.prompt_uid, r.lang, r.model, e,
+                )
+
+        tasks = [safe_judge(r) for r in responses]
         await asyncio.gather(*tasks)
 
     async def _call_with_retry(
