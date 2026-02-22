@@ -70,9 +70,10 @@ rate_display.index = [LANG_NAMES[l] for l in rate_display.index]
 rate_display.columns = [MODEL_FULL[m] for m in rate_display.columns]
 
 fig, (ax_main, ax_bar) = plt.subplots(
-    1, 2, figsize=(16, 8),
+    1, 2, figsize=(16, 9),
     gridspec_kw={"width_ratios": [7, 1.2], "wspace": 0.04},
 )
+fig.subplots_adjust(top=0.88)
 
 cmap_rate = mcolors.LinearSegmentedColormap.from_list(
     "apart_heat", ["#3b3f47", "#fee08b", "#f46d43", "#a50026"], N=256
@@ -96,17 +97,21 @@ ax_main.set_xlabel("")
 ax_main.set_ylabel("")
 ax_main.set_title(
     "Moderate+ Sycophancy Rate by Language & Model",
-    fontsize=22, fontweight="bold", color=APART_TEXT, pad=20,
+    fontsize=22, fontweight="bold", color=APART_TEXT, pad=35,
 )
 ax_main.text(
     0.5, -0.07,
     "% of items scoring \\u2265 0.30 on 0\\u20131 normalized scale  |  19,600 responses \\u00d7 6-judge panel",
     transform=ax_main.transAxes, ha="center", fontsize=11, color=APART_MUTED, style="italic",
 )
-ax_main.tick_params(labelsize=13)
+# Force all tick labels white
+ax_main.tick_params(labelsize=13, colors=APART_TEXT)
+for label in ax_main.get_xticklabels() + ax_main.get_yticklabels():
+    label.set_color(APART_TEXT)
 
+# Column means — positioned between title and heatmap top edge
 for j, val in enumerate(rate_col_means):
-    ax_main.text(j + 0.5, -0.35, f"{val:.0%}", ha="center", va="bottom",
+    ax_main.text(j + 0.5, -0.6, f"{val:.0%}", ha="center", va="bottom",
                  fontsize=11, color=APART_GREEN, fontweight="bold")
 
 y_pos = np.arange(len(rate_row_means))
@@ -122,7 +127,7 @@ for i, val in enumerate(rate_row_means.values):
 ax_bar.spines["top"].set_visible(False)
 ax_bar.spines["right"].set_visible(False)
 ax_bar.spines["left"].set_visible(False)
-ax_bar.tick_params(labelsize=10)
+ax_bar.tick_params(labelsize=10, colors=APART_TEXT)
 
 fig.savefig(OUT_FIG / "fig6_poster.png")
 plt.show()
@@ -147,7 +152,7 @@ tier_colors = {
     "Strong": "#a50026",
 }
 
-fig, ax = plt.subplots(figsize=(14, 6))
+fig, ax = plt.subplots(figsize=(16, 6))
 
 left_vals = np.zeros(len(sev_frac))
 for tier in SEVERITY_LABELS:
@@ -166,10 +171,13 @@ ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
 ax.set_xlabel("Proportion of Items", fontsize=14, color=APART_TEXT)
 ax.set_title("Sycophancy Severity Distribution by Model",
              fontsize=22, fontweight="bold", color=APART_TEXT, pad=20)
-ax.tick_params(labelsize=14)
+ax.tick_params(labelsize=14, colors=APART_TEXT)
+for label in ax.get_xticklabels() + ax.get_yticklabels():
+    label.set_color(APART_TEXT)
 
-legend = ax.legend(loc="lower right", frameon=True, fontsize=12, title="Severity",
-                   facecolor=APART_CARD, edgecolor=APART_MUTED)
+legend = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True,
+                   fontsize=12, title="Severity", facecolor=APART_CARD,
+                   edgecolor=APART_MUTED, borderpad=1)
 legend.get_title().set_color(APART_TEXT)
 for text in legend.get_texts():
     text.set_color(APART_TEXT)
@@ -177,6 +185,7 @@ for text in legend.get_texts():
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
+fig.subplots_adjust(right=0.85)
 fig.savefig(OUT_FIG / "fig7_poster.png")
 plt.show()
 print(f"Saved: {OUT_FIG / 'fig7_poster.png'}")
@@ -219,11 +228,13 @@ ax.text(
     color=APART_TEXT,
 )
 
-ax.set_xlabel("Mean COMET Score (translation quality)", fontsize=15)
-ax.set_ylabel("Mean Sycophancy (norm_score)", fontsize=15)
+ax.set_xlabel("Mean COMET Score (translation quality)", fontsize=15, color=APART_TEXT)
+ax.set_ylabel("Mean Sycophancy (norm_score)", fontsize=15, color=APART_TEXT)
 ax.set_title("Translation Quality Does Not\\nExplain Sycophancy Differences",
              fontsize=20, fontweight="bold", color=APART_TEXT, pad=16)
-ax.tick_params(labelsize=12)
+ax.tick_params(labelsize=12, colors=APART_TEXT)
+for label in ax.get_xticklabels() + ax.get_yticklabels():
+    label.set_color(APART_TEXT)
 
 fig.savefig(OUT_FIG / "fig5_poster.png")
 plt.show()
@@ -247,8 +258,20 @@ poster_cell = {
     "source": CELL_SOURCE,
 }
 
-# Insert before the last cell (export check)
-nb["cells"].insert(len(nb["cells"]) - 1, poster_cell)
+# Find and replace existing poster cell, or insert before last cell
+poster_idx = None
+for i, cell in enumerate(nb["cells"]):
+    src = "".join(cell.get("source", []) if isinstance(cell.get("source"), list) else cell.get("source", ""))
+    if "Poster-Ready Figures" in src and "Apart Dark Theme" in src:
+        poster_idx = i
+        break
+
+if poster_idx is not None:
+    nb["cells"][poster_idx] = poster_cell
+    print(f"Replaced existing poster cell at index {poster_idx}.")
+else:
+    nb["cells"].insert(len(nb["cells"]) - 1, poster_cell)
+    print("Inserted new poster cell.")
 
 with open(NB_PATH, "w", encoding="utf-8") as f:
     json.dump(nb, f, indent=1, ensure_ascii=False)
