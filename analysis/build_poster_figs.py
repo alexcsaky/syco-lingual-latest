@@ -240,6 +240,73 @@ fig.savefig(OUT_FIG / "fig5_poster.png")
 plt.show()
 print(f"Saved: {OUT_FIG / 'fig5_poster.png'}")
 
+# ========== FIGURE 9 POSTER: Mirror Facet by Language ==========
+
+mirror = syc[syc["facet"] == "mirror"].copy()
+
+# Moderate+ rate by language for mirror only
+mirror_rate = mirror.groupby("lang")["norm_score"].apply(lambda x: (x >= 0.30).mean())
+mirror_mean = mirror.groupby("lang")["norm_score"].mean()
+
+# Build a combined df for plotting
+mirror_lang = pd.DataFrame({
+    "lang": mirror_rate.index,
+    "rate": mirror_rate.values,
+    "mean": mirror_mean.values,
+})
+mirror_lang["lang_name"] = mirror_lang["lang"].map(LANG_NAMES)
+mirror_lang["resource"] = mirror_lang["lang"].map(RESOURCE_LEVELS)
+mirror_lang = mirror_lang.sort_values("rate", ascending=True)
+
+# Color by resource level
+res_colors = {"High": APART_GREEN, "Medium": "#fee08b", "Low": "#f46d43"}
+
+fig, ax = plt.subplots(figsize=(12, 7))
+
+bars = ax.barh(
+    mirror_lang["lang_name"], mirror_lang["rate"],
+    color=[res_colors[r] for r in mirror_lang["resource"]],
+    edgecolor=APART_BG, linewidth=1.5, height=0.65, alpha=0.9,
+)
+
+# Annotate each bar with rate %
+for i, (_, row) in enumerate(mirror_lang.iterrows()):
+    ax.text(row["rate"] + 0.01, i, f'{row["rate"]:.0%}',
+            va="center", fontsize=14, fontweight="bold", color=APART_TEXT)
+
+ax.set_xlim(0, mirror_lang["rate"].max() * 1.25)
+ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
+ax.set_xlabel("", fontsize=14, color=APART_TEXT)
+ax.set_title("Opinion Mirroring: The Facet Where Language Matters",
+             fontsize=22, fontweight="bold", color=APART_TEXT, pad=20)
+ax.tick_params(labelsize=14, colors=APART_TEXT)
+for label in ax.get_xticklabels() + ax.get_yticklabels():
+    label.set_color(APART_TEXT)
+
+# Subtitle below x-axis
+ax.text(0.5, -0.09,
+    "Moderate+ rate (norm_score \u2265 0.30)  |  Mirror facet only  |  \u03b7\u00b2 = 0.039, the strongest cross-linguistic effect",
+    transform=ax.transAxes, ha="center", fontsize=11, color=APART_MUTED, style="italic")
+
+# Resource level legend
+from matplotlib.patches import Patch
+legend_elements = [
+    Patch(facecolor=APART_GREEN, edgecolor=APART_BG, label="High resource"),
+    Patch(facecolor="#fee08b", edgecolor=APART_BG, label="Medium resource"),
+    Patch(facecolor="#f46d43", edgecolor=APART_BG, label="Low resource"),
+]
+legend = ax.legend(handles=legend_elements, loc="lower right", frameon=True,
+                   fontsize=12, facecolor=APART_CARD, edgecolor=APART_MUTED)
+for text in legend.get_texts():
+    text.set_color(APART_TEXT)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+fig.savefig(OUT_FIG / "fig9_mirror_poster.png")
+plt.show()
+print(f"Saved: {OUT_FIG / 'fig9_mirror_poster.png'}")
+
 # Reset style
 sns.set_theme(style="whitegrid", font_scale=1.1)
 plt.rcParams.update({
